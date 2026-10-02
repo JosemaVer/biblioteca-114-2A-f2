@@ -1,0 +1,18 @@
+[
+    {
+        "id_prestamo": 1,
+        "rut_socio": "22.222.222-2",
+        "rut_empleado": "12.345.678-5",
+        "fecha_registro": "2026-10-02 20:45:01",
+        "detalles": [
+            {
+                "codigo_material": "LIB-001",
+                "fecha_inicio": "2026-10-02 20:45:01",
+                "fecha_vencimiento": "2026-11-13 20:45:01",
+                "renovaciones_usadas": 2,
+                "devuelto": false,
+                "fecha_devolucion": null
+            }
+        ]
+    }
+]

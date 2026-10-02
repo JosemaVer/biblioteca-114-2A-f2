@@ -1,0 +1,22 @@
+[
+    {
+        "tipo": "Libro",
+        "codigo": "LIB-001",
+        "titulo": "Python Avanzado",
+        "autor": "Guido van Rossum",
+        "anio": 2020,
+        "estado": "Prestado",
+        "es_extranjero": true,
+        "valor_reposicion_pesos": 15000.0,
+        "valor_reposicion_dolares": 50.0
+    },
+    {
+        "tipo": "Revista",
+        "codigo": "REV-001",
+        "titulo": "Ciencia Hoy",
+        "autor": "Varios",
+        "anio": 2023,
+        "estado": "Disponible",
+        "numero_edicion": 10
+    }
+]

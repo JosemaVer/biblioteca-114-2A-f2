@@ -1,4 +1,4 @@
-﻿# 📚 Biblioteca - 114-2A-f2
+# 📚 Biblioteca - 114-2A-f2
 
 Repositorio del proyecto y bitácora de seguimiento para el módulo **Biblioteca (114-2A-f2)**.
 
@@ -25,6 +25,7 @@ Repositorio del proyecto y bitácora de seguimiento para el módulo **Biblioteca
 | Sesión / Fecha | Tema / Actividad Principal | Avances y Entregables | Notas / Pendientes |
 | :--- | :--- | :--- | :--- |
 | **09/09/2026** | Inicialización del Repositorio | Creación del repositorio público, estructura base y plantilla de bitácora. | Definir primeros requerimientos, clases y modelado del sistema. |
+| **21/09/2026** | Implementación Modelo UML y Lógica de Negocio | Clases base, materiales, roles, multas, préstamos, persistencia JSON y CLI robusto con manejo de excepciones. | Sistema 100% operativo y verificado con pruebas unitarias. |
 
 ---
 
@@ -32,8 +33,16 @@ Repositorio del proyecto y bitácora de seguimiento para el módulo **Biblioteca
 
 #### Sesión 1: Inicialización del Repositorio (09/09/2026)
 - **Actividades realizadas:**
-  - Creación y configuración del repositorio remoto en GitHub (iblioteca-114-2A-f2).
-  - Creación del directorio local del proyecto en Documents\Programación\biblioteca-114-2A-f2.
-  - Creación del archivo de bitácora inicial (README.md).
-- **Próximos pasos:**
-  - Iniciar la estructura de clases y módulos del sistema de biblioteca.
+  - Creación y configuración del repositorio remoto en GitHub.
+  - Creación del directorio local del proyecto en `Documents\Programación\biblioteca-114-2A-f2`.
+  - Creación del archivo de bitácora inicial (`README.md`).
+
+#### Sesión 2: Arquitectura Completa y Menú Interactivo (21/09/2026)
+- **Actividades realizadas:**
+  - Implementación de enumeraciones (`EstadoMaterial`, `EstadoMulta`) en `estados.py`.
+  - Jerarquía de materiales: `Material` (abstracta), `Libro`, `Revista` y `Multimedia`.
+  - Jerarquía de empleados y roles: `Bibliotecaria` y `Administradora` en `roles.py`.
+  - Lógica de multas y préstamos: `Multa`, `DetallePrestamo`, `Prestamo` y actualización de `Socio`.
+  - Controlador central `Biblioteca` en `biblioteca.py` con persistencia automática en formato JSON.
+  - Menú CLI interactivo en `main.py` blindado con validaciones de tipos y captura de excepciones (`try/except`).
+  - Suite de pruebas unitarias en `test_biblioteca.py` pasando al 100%.

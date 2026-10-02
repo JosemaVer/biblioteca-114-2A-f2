@@ -1,0 +1,11 @@
+[
+    {
+        "rut": "22.222.222-2",
+        "nombre": "Socio",
+        "apellido1": "Test",
+        "apellido2": "Tres",
+        "email": "socio@test.cl",
+        "direccion": "Calle 123",
+        "numero_socio": 101
+    }
+]
