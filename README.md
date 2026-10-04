@@ -26,6 +26,7 @@ Repositorio del proyecto y bitácora de seguimiento para el módulo **Biblioteca
 | :--- | :--- | :--- | :--- |
 | **09/09/2026** | Inicialización del Repositorio | Creación del repositorio público, estructura base y plantilla de bitácora. | Definir primeros requerimientos, clases y modelado del sistema. |
 | **21/09/2026** | Implementación Modelo UML y Lógica de Negocio | Clases base, materiales, roles, multas, préstamos, persistencia JSON y CLI robusto con manejo de excepciones. | Sistema 100% operativo y verificado con pruebas unitarias. |
+| **04/10/2026** | Refactorización de la arquitectura | Separación en módulos `model/`, `dao/` y `services/`; actualización del CLI, persistencia SQLite y pruebas. | Completado |
 
 ---
 
