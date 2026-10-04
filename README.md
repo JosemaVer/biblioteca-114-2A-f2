@@ -47,3 +47,14 @@ Repositorio del proyecto y bitácora de seguimiento para el módulo **Biblioteca
   - Controlador central `Biblioteca` en `biblioteca.py` con persistencia automática en formato JSON.
   - Menú CLI interactivo en `main.py` blindado con validaciones de tipos y captura de excepciones (`try/except`).
   - Suite de pruebas unitarias en `test_biblioteca.py` pasando al 100%.
+
+#### Sesión 4: Revisión y consolidación de la arquitectura (03–04/10/2026)
+
+- **Actividades realizadas:**
+  - Se reorganizó el proyecto en capas: `model/` para las entidades y reglas de dominio, `dao/` para la persistencia y `services/` para integraciones externas.
+  - Se trasladaron las clases del dominio a `model/` y se actualizaron sus importaciones y usos desde el menú de `main.py`.
+  - Se consolidó la persistencia en SQLite mediante `dao/conexion.py` y los DAO de materiales, socios y préstamos, con consultas parametrizadas y operaciones transaccionales.
+  - Se centralizó el consumo de la API del dólar en `services/api_dolar.py`, incluyendo timeout y manejo de errores de conexión.
+  - Se actualizaron las pruebas automatizadas para la arquitectura y persistencia actuales.
+- **Verificación:** Se ejecutaron las 9 pruebas de `test_biblioteca.py`; todas finalizaron correctamente.
+- **Entregable:** Refactorización publicada en GitHub en el commit `5572ec6`.
