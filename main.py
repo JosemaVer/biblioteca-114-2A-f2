@@ -10,6 +10,8 @@ y validaciones rigurosas de negocio.
 """
 import sys
 import os
+import math
+import re
 
 # Agregamos la ruta base para asegurar importaciones relativas limpias
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -26,7 +28,7 @@ from model.libro import Libro
 from model.revista import Revista
 from model.multimedia import Multimedia
 from model.prestamo import Prestamo
-from model.roles import Administradora, Bibliotecaria
+from model.roles import Administradora
 from model.empleado import Empleado
 from services.api_dolar import obtener_valor_dolar
 
@@ -43,6 +45,17 @@ def leer_texto_no_vacio(mensaje: str) -> str:
     """Solicita un texto y no permite valores vacíos ni solo espacios."""
     while True:
         valor = input(mensaje).strip()
+        if valor:
+            return valor
+        print("[!] Error: El campo no puede quedar en blanco. Intente nuevamente.")
+
+
+def leer_texto_no_vacio_o_cancelar(mensaje: str) -> str | None:
+    """Solicita un texto no vacío o permite cancelar ingresando 0."""
+    while True:
+        valor = input(mensaje).strip()
+        if valor == "0":
+            return None
         if valor:
             return valor
         print("[!] Error: El campo no puede quedar en blanco. Intente nuevamente.")
@@ -84,6 +97,14 @@ def leer_rut_validado(mensaje: str) -> str:
         print("    [Ejemplo: 12.345.678-5 o 12345678-5]")
 
 
+def rut_tiene_formato(rut: str) -> bool:
+    """Valida la estructura del RUT sin comprobar su dígito verificador."""
+    return re.fullmatch(
+        r"(?:\d{7,8}|\d{1,2}(?:\.\d{3}){2})-[\dKk]",
+        rut.strip(),
+    ) is not None
+
+
 def es_administradora() -> bool:
     """Verifica si el empleado con sesión activa es Administradora."""
     global EMPLEADO_ACTUAL
@@ -110,55 +131,36 @@ def requerir_administradora(accion: str) -> bool:
 # =============================================================================
 
 def iniciar_sesion():
-    """Permite seleccionar o autenticar el empleado que atiende en el mesón de forma obligatoria."""
+    """Autentica a un empleado mediante su RUT y contraseña."""
     global EMPLEADO_ACTUAL
 
     while True:
-        empleados = PrestamoDAO.listar_empleados()
-
         print("\n" + "="*60)
         print("      BIBLIOTECA MUNICIPAL CORDILLERA - INICIO DE SESIÓN")
         print("="*60)
-        
-        if empleados:
-            print("Seleccione el empleado que atiende en mesón:")
-            for idx, emp in enumerate(empleados, 1):
-                rol_nombre = emp.__class__.__name__
-                print(f"  {idx}. [{emp.id_empleado}] {emp.nombre:<20} | Rol: {rol_nombre:<14} | RUT: {emp.rut}")
-            print("  3. Ingresar RUT de empleado manualmente")
-            print("  0. Salir del programa")
-            print("-" * 60)
+        rut = input("RUT (0 para salir): ").strip().upper()
+        if rut == "0":
+            print("\n[!] Saliendo del sistema...")
+            sys.exit(0)
+        if not rut_tiene_formato(rut):
+            print("[!] Formato de RUT inválido. Use, por ejemplo, 1111111-1.")
+            continue
 
-            opc = input("Seleccione una opción: ").strip().upper()
-            
-            if opc.isdigit() and 1 <= int(opc) <= len(empleados):
-                EMPLEADO_ACTUAL = empleados[int(opc) - 1]
-                print(f"\n[OK] Sesión iniciada correctamente como: {EMPLEADO_ACTUAL.nombre} [{EMPLEADO_ACTUAL.__class__.__name__}]")
-                return
-            elif opc == "R":
-                rut_in = leer_rut_validado("Ingrese RUT del empleado (ej. 11111111-1 o 22222222-2): ")
-                emp = PrestamoDAO.obtener_empleado_por_rut(rut_in)
-                if emp:
-                    EMPLEADO_ACTUAL = emp
-                    print(f"\n[OK] Sesión iniciada correctamente como: {EMPLEADO_ACTUAL.nombre} [{EMPLEADO_ACTUAL.__class__.__name__}]")
-                    return
-                else:
-                    print("\n" + "!"*65)
-                    print(f"  [ACCESO DENEGADO]: No existe ningún empleado registrado")
-                    print(f"  con el RUT '{rut_in}'.")
-                    print("!"*65)
-            elif opc == "0":
-                print("\n[!] Saliendo del sistema...")
-                sys.exit(0)
-            else:
-                print(f"[!] Opción '{opc}' no válida. Seleccione un empleado de la lista o ingrese un RUT válido.")
-        else:
-            print("[!] Error crítico: No hay empleados registrados en la base de datos.")
-            sys.exit(1)
+        empleado = PrestamoDAO.obtener_empleado_por_rut(rut)
+        clave = input("Contraseña: ")
+        if empleado and empleado.autenticar(clave):
+            EMPLEADO_ACTUAL = empleado
+            print(
+                f"\n[OK] Sesión iniciada correctamente como: "
+                f"{EMPLEADO_ACTUAL.nombre} [{EMPLEADO_ACTUAL.__class__.__name__}]"
+            )
+            return
+
+        print("\n[!] RUT o contraseña incorrectos. Intente nuevamente.")
 
 
 def menu_sesion():
-    """Muestra y permite cambiar la sesión activa de mesón."""
+    """Permite volver a autenticar o cambiar la contraseña de la sesión actual."""
     global EMPLEADO_ACTUAL
     while True:
         rol_nombre = EMPLEADO_ACTUAL.__class__.__name__
@@ -166,40 +168,41 @@ def menu_sesion():
         print("  3. GESTIÓN DE SESIÓN DE MESÓN")
         print("="*60)
         print(f"  Usuario Activo:  {EMPLEADO_ACTUAL.nombre}")
-        print(f"  ID Empleado:     {EMPLEADO_ACTUAL.id_empleado}")
         print(f"  RUT:             {EMPLEADO_ACTUAL.rut}")
         print(f"  Rol Actual:      {rol_nombre}")
         print("-" * 60)
-        print("  1. Cambiar a Administradora (ADM01 - María Cordillera)")
-        print("  2. Cambiar a Bibliotecaria (EMP01 - Ana González)")
-        print("  3. Buscar empleado por RUT")
+        print("  1. Cambiar de usuario (requiere contraseña)")
+        print("  2. Cambiar mi contraseña")
         print("  0. Volver al menú principal")
         print("="*60)
 
-        opc = input("Seleccione una opción [0-3]: ").strip()
+        opc = input("Seleccione una opción [0-2]: ").strip()
 
         if opc == "1":
-            emp = PrestamoDAO.obtener_empleado_por_id("ADM01")
-            if emp:
-                EMPLEADO_ACTUAL = emp
-                print(f"\n[OK] Sesión cambiada a: {EMPLEADO_ACTUAL.nombre} [Administradora]")
-            else:
-                print("[!] Error al cargar Administradora.")
+            iniciar_sesion()
         elif opc == "2":
-            emp = PrestamoDAO.obtener_empleado_por_id("EMP01")
-            if emp:
-                EMPLEADO_ACTUAL = emp
-                print(f"\n[OK] Sesión cambiada a: {EMPLEADO_ACTUAL.nombre} [Bibliotecaria]")
+            clave_actual = input("Contraseña actual: ")
+            if not EMPLEADO_ACTUAL.autenticar(clave_actual):
+                print("[!] La contraseña actual es incorrecta.")
+                continue
+
+            nueva_clave = input("Nueva contraseña (mínimo 8 caracteres): ")
+            if len(nueva_clave) < 8:
+                print("[!] La contraseña debe tener al menos 8 caracteres.")
+                continue
+            confirmacion = input("Repita la nueva contraseña: ")
+            if nueva_clave != confirmacion:
+                print("[!] Las contraseñas no coinciden.")
+                continue
+
+            if PrestamoDAO.actualizar_clave_acceso(
+                EMPLEADO_ACTUAL.id_empleado,
+                nueva_clave,
+            ):
+                EMPLEADO_ACTUAL.clave_acceso = nueva_clave
+                print("[OK] Contraseña actualizada correctamente.")
             else:
-                print("[!] Error al cargar Bibliotecaria.")
-        elif opc == "3":
-            rut_in = leer_rut_validado("Ingrese RUT del empleado: ")
-            emp = PrestamoDAO.obtener_empleado_por_rut(rut_in)
-            if emp:
-                EMPLEADO_ACTUAL = emp
-                print(f"\n[OK] Sesión cambiada a: {EMPLEADO_ACTUAL.nombre} [{EMPLEADO_ACTUAL.__class__.__name__}]")
-            else:
-                print(f"[!] No existe empleado registrado con RUT '{rut_in}'.")
+                print("[!] No se pudo actualizar la contraseña del empleado.")
         elif opc == "0":
             break
         else:
@@ -271,20 +274,37 @@ def menu_crear_material():
 def menu_listar_materiales():
     """Muestra el catálogo completo de materiales registrados."""
     materiales = MaterialDAO.listar_todos()
-    print("\n" + "="*85)
+    danos = MaterialDAO.listar_ultimos_danos()
+    print("\n" + "="*112)
     print("  CATÁLOGO DE MATERIALES REGISTRADOS")
-    print("="*85)
+    print("="*112)
     if not materiales:
         print("No hay materiales registrados en la base de datos.")
         return
 
-    print(f"{'CÓDIGO':<10} | {'TIPO':<12} | {'TÍTULO':<32} | {'ESTADO':<14} | {'PRÉSTAMO'}")
-    print("-" * 85)
+    print(
+        f"{'CÓDIGO':<10} | {'TIPO':<12} | {'TÍTULO':<30} | "
+        f"{'REPOSICIÓN':>18} | {'ESTADO':<14} | {'PRÉSTAMO'}"
+    )
+    print("-" * 112)
     for m in materiales:
         tipo = m.__class__.__name__
         prestamo_info = f"{m.getDiasPrestamo()} días / {m.getMaxRenovaciones()} ren."
-        print(f"{m.codigo:<10} | {tipo:<12} | {m.titulo[:30]:<32} | {m.estado.value:<14} | {prestamo_info}")
-    print("-" * 85)
+        if isinstance(m, Libro) and not m.es_extranjero:
+            valor_reposicion = f"${m.valor_reposicion_pesos:,.0f} CLP"
+        else:
+            valor_reposicion = f"${m.valor_reposicion_usd:,.2f} USD"
+        print(
+            f"{m.codigo:<10} | {tipo:<12} | {m.titulo[:30]:<30} | "
+            f"{valor_reposicion:>18} | {m.estado.value:<14} | {prestamo_info}"
+        )
+        if m.codigo in danos:
+            dano = danos[m.codigo]
+            print(
+                f"   Último daño: {dano['categoria']} - {dano['descripcion']} "
+                f"(registrado {dano['fecha']})"
+            )
+    print("-" * 112)
 
 
 def menu_modificar_material():
@@ -305,6 +325,48 @@ def menu_modificar_material():
     nuevo_titulo = leer_texto_no_vacio("Ingrese el nuevo título: ")
     MaterialDAO.actualizar_titulo(codigo, nuevo_titulo)
     print(f"[OK] Título del material '{codigo}' actualizado a '{nuevo_titulo}'.")
+
+
+def menu_actualizar_precio_material():
+    """Actualiza el valor de reposición de un material. Exclusivo de Administradora."""
+    if not requerir_administradora("Actualizar el precio de un material"):
+        return
+
+    print("\n" + "="*50)
+    print("  ACTUALIZAR PRECIO DE MATERIAL")
+    print("="*50)
+    codigo = leer_texto_no_vacio("Ingrese el código del material: ").upper()
+    material = MaterialDAO.obtener_por_codigo(codigo)
+    if not material:
+        print(f"[!] Error: No se encontró ningún material con el código '{codigo}'.")
+        return
+
+    if isinstance(material, Libro):
+        if material.es_extranjero:
+            print(f"Valor actual: ${material.valor_reposicion_usd:,.2f} USD")
+            valor = leer_flotante_no_negativo("Ingrese el nuevo valor en dólares (USD): ")
+        else:
+            print(f"Valor actual: ${material.valor_reposicion_pesos:,.0f} CLP")
+            while True:
+                valor = leer_flotante_no_negativo(
+                    "Ingrese el nuevo valor en pesos (CLP, sin centavos): "
+                )
+                if valor.is_integer():
+                    break
+                print("[!] El precio en pesos debe ser un número entero.")
+    else:
+        print(f"Valor actual: ${material.valor_reposicion_usd:,.2f} USD")
+        valor = leer_flotante_no_negativo("Ingrese el nuevo valor en dólares (USD): ")
+
+    actualizado = MaterialDAO.actualizar_precio_reposicion(
+        material.codigo,
+        valor,
+    )
+    if actualizado:
+        unidad = "USD" if not isinstance(material, Libro) or material.es_extranjero else "CLP"
+        print(f"[OK] Precio de reposición de '{material.titulo}' actualizado a ${valor:,.2f} {unidad}.")
+    else:
+        print(f"[!] No se pudo actualizar el precio del material '{material.codigo}'.")
 
 
 def menu_eliminar_material():
@@ -331,28 +393,31 @@ def menu_eliminar_material():
 
 def menu_catalogo():
     """Submenú agrupado para la gestión de catálogo."""
+    opciones = [
+        ("Listar catálogo de materiales", menu_listar_materiales),
+    ]
+    if es_administradora():
+        opciones.extend([
+            ("Registrar nuevo material", menu_crear_material),
+            ("Modificar título de material", menu_modificar_material),
+            ("Eliminar material", menu_eliminar_material),
+            ("Actualizar precio de material", menu_actualizar_precio_material),
+        ])
+
     while True:
         print("\n" + "="*60)
         print("  1. GESTIÓN DE CATÁLOGO")
         print("="*60)
-        print("  1. Listar catálogo de materiales")
-        print("  2. Registrar nuevo material (Alta) [Solo Administradora]")
-        print("  3. Modificar título de material [Solo Administradora]")
-        print("  4. Eliminar material [Solo Administradora]")
+        for numero, (descripcion, _) in enumerate(opciones, 1):
+            print(f"  {numero}. {descripcion}")
         print("  0. Volver al menú principal")
         print("="*60)
 
-        opc = input("Seleccione una opción [0-4]: ").strip()
-        if opc == "1":
-            menu_listar_materiales()
-        elif opc == "2":
-            menu_crear_material()
-        elif opc == "3":
-            menu_modificar_material()
-        elif opc == "4":
-            menu_eliminar_material()
-        elif opc == "0":
+        opc = input(f"Seleccione una opción [0-{len(opciones)}]: ").strip()
+        if opc == "0":
             break
+        if opc.isdigit() and 1 <= int(opc) <= len(opciones):
+            opciones[int(opc) - 1][1]()
         else:
             print("[!] Opción no válida.")
 
@@ -366,18 +431,70 @@ def menu_registrar_socio():
     print("\n" + "="*50)
     print("  REGISTRAR NUEVO SOCIO")
     print("="*50)
-    rut = leer_rut_validado("Ingrese RUT del socio (con o sin puntos/guion): ")
+
+    while True:
+        entrada = leer_texto_no_vacio_o_cancelar(
+            "Ingrese RUT del socio (con o sin puntos/guion; 0 para volver): "
+        )
+        if entrada is None:
+            print("Registro cancelado. Volviendo al menú de socios.")
+            return
+        if Persona.validar_rut(entrada):
+            rut = Persona.formatear_rut(entrada)
+            break
+        print(f"[!] Error: El RUT '{entrada}' es INVÁLIDO (dígito verificador incorrecto o formato inválido).")
+        print("    [Ejemplo: 12.345.678-5 o 12345678-5]")
     
     if SocioDAO.obtener_por_rut(rut) is not None:
         print(f"[!] Error: Ya existe un socio registrado con el RUT '{rut}'.")
         return
 
-    nombre = leer_texto_no_vacio("Ingrese nombre completo del socio: ")
-    direccion = leer_texto_no_vacio("Ingrese dirección de residencia: ")
+    nombre = leer_texto_no_vacio_o_cancelar(
+        "Ingrese nombre completo del socio (0 para volver): "
+    )
+    if nombre is None:
+        print("Registro cancelado. Volviendo al menú de socios.")
+        return
+
+    direccion = leer_texto_no_vacio_o_cancelar(
+        "Ingrese dirección de residencia (0 para volver): "
+    )
+    if direccion is None:
+        print("Registro cancelado. Volviendo al menú de socios.")
+        return
 
     nuevo_socio = Socio(rut=rut, nombre=nombre, direccion=direccion)
     SocioDAO.crear(nuevo_socio)
     print(f"\n[OK] Socio '{nuevo_socio.nombre}' (RUT: {nuevo_socio.rut}) registrado exitosamente.")
+
+
+def menu_registrar_multa():
+    """Registra manualmente una multa pendiente a un socio existente."""
+    print("\n" + "="*60)
+    print("  ASIGNAR MULTA MANUAL A SOCIO")
+    print("="*60)
+
+    rut = leer_rut_validado("Ingrese RUT del socio: ")
+    socio = SocioDAO.obtener_por_rut(rut)
+    if not socio:
+        print(f"[!] No existe un socio registrado con el RUT '{rut}'.")
+        return
+
+    monto = leer_entero_positivo("Ingrese monto de la multa en CLP: ")
+
+    motivo = leer_texto_no_vacio("Ingrese el motivo de la multa: ")
+    confirmar = input(
+        f"¿Confirmar multa de ${monto:,.0f} CLP a {socio.nombre}? [S/N]: "
+    ).strip().upper()
+    if confirmar != "S":
+        print("Operación cancelada.")
+        return
+
+    multa = SocioDAO.registrar_multa(socio.rut, monto, motivo)
+    print(
+        f"\n[OK] Multa #{multa.id_multa} por ${multa.monto:,.0f} CLP "
+        f"registrada para {socio.nombre}."
+    )
 
 
 def menu_listar_socios():
@@ -454,13 +571,10 @@ def menu_consultar_multas():
 
 def menu_cobrar_reposicion_libro_perdido():
     """
-    Registra el cobro por un libro o material perdido:
-    - Si es extranjero, calcula el valor según el dólar del día vía API en tiempo real.
-    - Si es nacional, aplica el valor fijo en pesos.
-    - Marca el material como EXTRAVIADO y genera la multa pendiente al socio.
+    Registra un daño parcial o pérdida total y calcula la multa sobre el valor de reposición.
     """
     print("\n" + "="*70)
-    print("  COBRO DE VALOR DE REPOSICIÓN POR MATERIAL EXTRAVIADO/PERDIDO")
+    print("  REGISTRO DE DAÑO O PÉRDIDA DE MATERIAL")
     print("="*70)
 
     rut = leer_rut_validado("Ingrese RUT del socio responsable de la pérdida: ")
@@ -478,41 +592,93 @@ def menu_cobrar_reposicion_libro_perdido():
     print(f"\nMaterial: {mat.titulo} ({mat.__class__.__name__})")
     print(f"Estado actual: {mat.estado.value}")
 
-    # Cálculo del valor de reposición
-    monto_clp = 0
+    print("\nSeleccione el nivel del daño:")
+    print("1. Leve - rayado o mancha superficial (25%)")
+    print("2. Moderado - falta una hoja o tapa dañada (50%)")
+    print("3. Grave - varias hojas faltantes o daño que dificulta el uso (75%)")
+    print("4. Pérdida total - extraviado o inutilizable (100%)")
+    categoria_opcion = input("Seleccione una opción [1-4]: ").strip()
+    categorias = {
+        "1": "Leve",
+        "2": "Moderado",
+        "3": "Grave",
+        "4": "Pérdida total",
+    }
+    categoria = categorias.get(categoria_opcion)
+    if categoria is None:
+        print("[!] Opción no válida. Operación cancelada.")
+        return
+
+    descripcion = leer_texto_no_vacio(
+        "Describa el daño (ej. falta una hoja, falta la tapa, está rayado): "
+    )
+
+    valor_reposicion_clp = 0.0
     if isinstance(mat, Libro):
         if mat.es_extranjero:
             print("\n[*] El libro es extranjero (adquirido en USD).")
             print(f"    Valor base: ${mat.valor_reposicion_usd:,.2f} USD")
             print("[*] Consultando cotización del Dólar en vivo desde API (mindicador.cl)...")
             valor_dolar, origen = obtener_valor_dolar(timeout=5)
-            monto_clp = mat.calcularValorReposicion(valor_dolar)
+            valor_reposicion_clp = mat.calcularValorReposicion(valor_dolar)
             print(f"    Cotización dólar ({origen}): ${valor_dolar:,.2f} CLP")
-            print(f"    Valor total de reposición a cobrar: ${monto_clp:,.0f} CLP")
         else:
-            monto_clp = mat.valor_reposicion_pesos
-            print(f"\n[*] Libro nacional con valor de reposición fijo: ${monto_clp:,.0f} CLP")
+            valor_reposicion_clp = mat.valor_reposicion_pesos
+            print(f"\n[*] Libro nacional con valor de reposición: ${valor_reposicion_clp:,.0f} CLP")
     else:
-        # Revista o Multimedia con valor en USD
         if mat.valor_reposicion_usd > 0:
             print(f"\n[*] Material importado con valor base de ${mat.valor_reposicion_usd:,.2f} USD.")
             print("[*] Consultando cotización del Dólar en vivo desde API...")
             valor_dolar, origen = obtener_valor_dolar(timeout=5)
-            monto_clp = int(round(mat.valor_reposicion_usd * valor_dolar))
-            print(f"    Cotización dólar: ${valor_dolar:,.2f} CLP | Total: ${monto_clp:,.0f} CLP")
+            valor_reposicion_clp = mat.valor_reposicion_usd * valor_dolar
+            print(f"    Cotización dólar ({origen}): ${valor_dolar:,.2f} CLP")
         else:
-            monto_clp = int(leer_flotante_no_negativo("Ingrese monto a cobrar en CLP por reposición: "))
+            valor_reposicion_clp = leer_flotante_no_negativo(
+                "El material no tiene valor de reposición cargado. "
+                "Ingrese su valor de reposición en CLP: "
+            )
 
-    motivo = f"Reposición por pérdida de {mat.__class__.__name__} '{mat.titulo}' ({mat.codigo})"
-    
-    confirmar = input(f"\n¿Confirmar multa de ${monto_clp:,.0f} CLP a {socio.nombre}? [S/N]: ").strip().upper()
+    if not math.isfinite(valor_reposicion_clp) or valor_reposicion_clp <= 0:
+        print("[!] El material no tiene un valor de reposición registrado.")
+        valor_reposicion_clp = leer_entero_positivo(
+            "Ingrese el valor de reposición en CLP para calcular la multa: "
+        )
+
+    porcentaje = PrestamoDAO.PORCENTAJES_DANO[categoria]
+    monto_multa = int(round(valor_reposicion_clp * porcentaje / 100))
+    print(f"    Categoría: {categoria} ({porcentaje}%)")
+    print(f"    Valor de reposición: ${valor_reposicion_clp:,.0f} CLP")
+    print(f"    Multa a aplicar: ${monto_multa:,.0f} CLP")
+
+    confirmar = input(
+        f"\n¿Confirmar multa de ${monto_multa:,.0f} CLP a {socio.nombre}? [S/N]: "
+    ).strip().upper()
     if confirmar == "S":
-        # 1. Registrar la multa
-        multa = SocioDAO.registrar_multa(socio.rut, monto_clp, motivo)
-        # 2. Actualizar estado del material a EXTRAVIADO
-        MaterialDAO.actualizar_estado(mat.codigo, EstadoMaterial.EXTRAVIADO)
-        print(f"\n[OK] Multa #{multa.id_multa} por ${monto_clp:,.0f} CLP aplicada con éxito a {socio.nombre}.")
-        print(f"     Material '{mat.codigo}' marcado como EXTRAVIADO en la base de datos.")
+        try:
+            resultado = PrestamoDAO.registrar_dano(
+                mat.codigo,
+                socio.rut,
+                categoria,
+                descripcion,
+                valor_reposicion_clp,
+            )
+        except ValueError as error:
+            print(f"[!] No se pudo registrar el daño: {error}")
+            return
+        print(
+            f"\n[OK] Multa #{resultado['id_multa']} por "
+            f"${resultado['monto_multa']:,.0f} CLP aplicada a {socio.nombre}."
+        )
+        if categoria == "Pérdida total":
+            print(f"     Material '{mat.codigo}' marcado como EXTRAVIADO.")
+        else:
+            print(f"     Material '{mat.codigo}' permanece disponible para préstamos.")
+            print(f"     Daño registrado: {categoria} - {descripcion}.")
+        if resultado["multa_atraso"]:
+            print(
+                f"     Multa adicional por atraso: "
+                f"${resultado['multa_atraso']['monto']:,.0f} CLP."
+            )
         print("     El socio ha quedado bloqueado para solicitar préstamos hasta saldar la deuda.")
     else:
         print("Operación cancelada.")
@@ -520,13 +686,21 @@ def menu_cobrar_reposicion_libro_perdido():
 
 def menu_pagar_o_condonar_multa():
     """Permite pagar multas (Bibliotecaria/Admin) o condonar multas (Solo Administradora)."""
+    opciones = [
+        ("Pagar multa específica por ID", "1"),
+        ("Pagar todas las multas pendientes de un socio", "2"),
+    ]
+    if es_administradora():
+        opciones.append(("Condonar multa", "3"))
+
     print("\n" + "="*60)
     print("  GESTIÓN DE PAGO Y CONDONACIÓN DE MULTAS")
     print("="*60)
-    print("1. Pagar multa específica por ID (Bibliotecaria / Administradora)")
-    print("2. Pagar TODAS las multas pendientes de un socio")
-    print("3. Condonar multa [Solo Administradora]")
-    opc = input("Seleccione una opción [1-3]: ").strip()
+    for numero, (descripcion, _) in enumerate(opciones, 1):
+        print(f"{numero}. {descripcion}")
+    opc = input(f"Seleccione una opción [1-{len(opciones)}]: ").strip()
+    if opc.isdigit() and 1 <= int(opc) <= len(opciones):
+        opc = opciones[int(opc) - 1][1]
 
     if opc == "1":
         id_m = leer_entero_positivo("Ingrese el ID de la multa a pagar: ")
@@ -583,34 +757,31 @@ def menu_eliminar_socio():
 
 def menu_socios():
     """Submenú agrupado para la gestión de socios y multas."""
+    opciones = [
+        ("Registrar nuevo socio", menu_registrar_socio),
+        ("Listar socios y estado general", menu_listar_socios),
+        ("Consultar y detallar multas (Por socio o general)", menu_consultar_multas),
+        ("Registrar daño o pérdida de material y aplicar multa", menu_cobrar_reposicion_libro_perdido),
+        ("Pagar o condonar multas", menu_pagar_o_condonar_multa),
+    ]
+    if es_administradora():
+        opciones.append(("Eliminar socio", menu_eliminar_socio))
+    opciones.append(("Asignar multa manual a socio", menu_registrar_multa))
+
     while True:
         print("\n" + "="*60)
         print("  2. GESTIÓN DE SOCIOS Y MULTAS")
         print("="*60)
-        print("  1. Registrar nuevo socio (Validación RUT Módulo 11)")
-        print("  2. Listar socios y estado general")
-        print("  3. Consultar y detallar multas (Por socio o general)")
-        print("  4. Cobrar reposición por libro/material perdido (API Dólar)")
-        print("  5. Pagar o condonar multas")
-        print("  6. Eliminar socio [Solo Administradora]")
+        for numero, (descripcion, _) in enumerate(opciones, 1):
+            print(f"  {numero}. {descripcion}")
         print("  0. Volver al menú principal")
         print("="*60)
 
-        opc = input("Seleccione una opción [0-6]: ").strip()
-        if opc == "1":
-            menu_registrar_socio()
-        elif opc == "2":
-            menu_listar_socios()
-        elif opc == "3":
-            menu_consultar_multas()
-        elif opc == "4":
-            menu_cobrar_reposicion_libro_perdido()
-        elif opc == "5":
-            menu_pagar_o_condonar_multa()
-        elif opc == "6":
-            menu_eliminar_socio()
-        elif opc == "0":
+        opc = input(f"Seleccione una opción [0-{len(opciones)}]: ").strip()
+        if opc == "0":
             break
+        if opc.isdigit() and 1 <= int(opc) <= len(opciones):
+            opciones[int(opc) - 1][1]()
         else:
             print("[!] Opción no válida.")
 
@@ -717,19 +888,35 @@ def menu_devolver_material():
         print(f"[!] El material '{mat.titulo}' ({mat.codigo}) ya se encuentra DISPONIBLE en estantería.")
         return
 
-    PrestamoDAO.devolver_material(mat.codigo)
+    monto_multa = PrestamoDAO.devolver_material(mat.codigo)
+    if monto_multa is None:
+        print(f"[!] No se encontró un préstamo activo para el material '{mat.codigo}'.")
+        return
+
     print(f"\n[OK] Material '{mat.titulo}' ({mat.codigo}) devuelto exitosamente.")
     print("     Estado actualizado a: DISPONIBLE.")
+    if monto_multa > 0:
+        print(f"     Se registró una multa automática por atraso de ${monto_multa:,.0f} CLP.")
 
 
 def menu_consultar_prestamos():
-    """Consulta los préstamos registrados en la base de datos junto a sus líneas de detalle."""
-    prestamos = PrestamoDAO.listar_todos()
+    """Consulta el historial de préstamos de un socio identificado por su RUT."""
     print("\n" + "="*85)
-    print("  CONSULTA DE HISTORIAL DE PRÉSTAMOS Y LÍNEAS DE DETALLE (SQLite)")
+    print("  CONSULTA DE HISTORIAL DE PRÉSTAMOS POR SOCIO")
     print("="*85)
+
+    rut = leer_rut_validado("Ingrese el RUT del socio: ")
+    socio = SocioDAO.obtener_por_rut(rut)
+    if not socio:
+        print(f"[!] No existe un socio registrado con el RUT '{rut}'.")
+        return
+
+    prestamos = [
+        prestamo for prestamo in PrestamoDAO.listar_todos()
+        if prestamo["socio_rut"] == socio.rut
+    ]
     if not prestamos:
-        print("No hay préstamos registrados en la base de datos.")
+        print(f"No hay préstamos registrados para {socio.nombre} ({socio.rut}).")
         return
 
     for p in prestamos:
@@ -773,6 +960,13 @@ def menu_transacciones():
 def menu_principal():
     """Bucle principal de la aplicación simplificado en 4 módulos."""
     inicializar_base_datos()
+    multas_atraso = PrestamoDAO.procesar_multas_atraso()
+    if multas_atraso:
+        total_multas = sum(multa["monto"] for multa in multas_atraso)
+        print(
+            f"[OK] Se actualizaron {len(multas_atraso)} multa(s) automática(s) "
+            f"por atraso, por un total de ${total_multas:,.0f} CLP."
+        )
     iniciar_sesion()
 
     while True:
@@ -783,7 +977,7 @@ def menu_principal():
         print("="*60)
         print("  1. Catálogo de Materiales (Libros, Revistas, Videos)")
         print("  2. Socios y Multas (Registro, Historial, Pérdidas con API Dólar)")
-        print("  3. Sesión de Mesón (Cambiar Bibliotecaria / Administradora)")
+        print("  3. Mi sesión (Cambiar usuario o contraseña)")
         print("  4. Transacciones (Préstamos, Devoluciones, Historial)")
         print("  0. Salir del programa")
         print("="*60)

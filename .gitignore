@@ -1,2 +1,34 @@
-﻿__pycache__/
+# Python
+__pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Base de datos SQLite (datos locales, no van al repo)
+data/
+*.db
+*.sqlite3
+
+# Archivos del proyecto que NO son código
+*.pdf
+*.xlsx
+*.xls
+*.docx
+*.doc
+*.png
+*.jpg
+*.jpeg
+*.drawio
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/

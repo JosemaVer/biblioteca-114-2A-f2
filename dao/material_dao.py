@@ -2,6 +2,7 @@
 DAO para Materiales (Libros, Revistas y Multimedia).
 Implementa CRUD completo utilizando consultas parametrizadas (?) para prevenir inyección SQL.
 """
+import math
 from dao.conexion import obtener_conexion
 from model.estados import EstadoMaterial
 from model.material import Material
@@ -91,6 +92,31 @@ class MaterialDAO:
         return [MaterialDAO._fila_a_objeto(f) for f in filas]
 
     @staticmethod
+    def listar_ultimos_danos() -> dict[str, dict]:
+        """Retorna el daño más reciente registrado para cada material."""
+        conexion = obtener_conexion()
+        cursor = conexion.cursor()
+        cursor.execute("""
+            SELECT d.codigo_material, d.categoria, d.descripcion, d.fecha_registro
+            FROM danos_materiales d
+            WHERE d.id = (
+                SELECT MAX(d2.id)
+                FROM danos_materiales d2
+                WHERE d2.codigo_material = d.codigo_material
+            )
+        """)
+        filas = cursor.fetchall()
+        conexion.close()
+        return {
+            fila[0]: {
+                "categoria": fila[1],
+                "descripcion": fila[2],
+                "fecha": fila[3],
+            }
+            for fila in filas
+        }
+
+    @staticmethod
     def actualizar_titulo(codigo: str, nuevo_titulo: str) -> bool:
         """
         Actualiza el título de un material existente.
@@ -108,6 +134,60 @@ class MaterialDAO:
         conexion.commit()
         conexion.close()
         return filas_afectadas > 0
+
+    @staticmethod
+    def actualizar_precio_reposicion(
+        codigo: str,
+        valor: float,
+    ) -> bool:
+        """Actualiza el valor de reposición en la moneda correspondiente al material."""
+        conexion = obtener_conexion()
+        cursor = conexion.cursor()
+
+        try:
+            precio = float(valor)
+            if not math.isfinite(precio) or precio < 0:
+                raise ValueError("El precio de reposición debe ser un número finito no negativo.")
+
+            cursor.execute(
+                "SELECT tipo, es_extranjero FROM materiales WHERE codigo = ?",
+                (codigo.strip().upper(),),
+            )
+            material = cursor.fetchone()
+            if not material:
+                return False
+
+            tipo, es_extranjero = material
+            if tipo == "Libro" and not es_extranjero:
+                if not precio.is_integer():
+                    raise ValueError("El precio de un libro nacional debe ser un número entero de pesos.")
+                cursor.execute("""
+                    UPDATE materiales
+                    SET valor_reposicion_pesos = ?, valor_reposicion_usd = 0
+                    WHERE codigo = ?
+                """, (int(precio), codigo.strip().upper()))
+            elif tipo == "Libro":
+                cursor.execute("""
+                    UPDATE materiales
+                    SET valor_reposicion_usd = ?, valor_reposicion_pesos = 0
+                    WHERE codigo = ?
+                """, (precio, codigo.strip().upper()))
+            elif tipo in ("Revista", "Multimedia"):
+                cursor.execute("""
+                    UPDATE materiales
+                    SET valor_reposicion_usd = ?
+                    WHERE codigo = ?
+                """, (precio, codigo.strip().upper()))
+            else:
+                raise ValueError(f"Tipo de material '{tipo}' no soportado.")
+
+            conexion.commit()
+            return cursor.rowcount > 0
+        except Exception:
+            conexion.rollback()
+            raise
+        finally:
+            conexion.close()
 
     @staticmethod
     def actualizar_estado(codigo: str, nuevo_estado: EstadoMaterial) -> bool:

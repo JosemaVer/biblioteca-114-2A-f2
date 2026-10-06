@@ -7,8 +7,9 @@ class Persona:
     Clase base para toda persona registrada en el sistema.
     Aplica encapsulamiento mediante atributos privados (__rut, __nombre).
     """
-    def __init__(self, rut: str, nombre: str):
+    def __init__(self, rut: str, nombre: str, *, validar_rut: bool = True):
         # Asignamos a través de las propiedades para activar la validación en los setters
+        self.__validar_rut = validar_rut
         self.rut = rut
         self.nombre = nombre
 
@@ -26,7 +27,7 @@ class Persona:
         if not valor or not isinstance(valor, str):
             raise ValueError("El RUT no puede estar vacío.")
         
-        if not self.validar_rut(valor):
+        if self.__validar_rut and not self.validar_rut(valor):
             raise ValueError(f"El RUT '{valor}' no es válido (dígito verificador incorrecto o formato inválido).")
         
         self.__rut = self.formatear_rut(valor)

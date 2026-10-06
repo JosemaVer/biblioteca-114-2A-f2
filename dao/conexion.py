@@ -4,6 +4,7 @@ Garantiza la creación de carpetas, base de datos y tablas al iniciar el sistema
 """
 import os
 import sqlite3
+from services.passwords import es_hash_clave, hashear_clave
 
 
 DB_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
@@ -79,6 +80,24 @@ def inicializar_base_datos():
         );
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS danos_materiales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo_material TEXT NOT NULL,
+            rut_socio TEXT NOT NULL,
+            categoria TEXT NOT NULL,
+            descripcion TEXT NOT NULL,
+            porcentaje REAL NOT NULL,
+            valor_reposicion_clp REAL NOT NULL,
+            monto_multa REAL NOT NULL,
+            fecha_registro TEXT NOT NULL,
+            id_multa INTEGER NOT NULL,
+            FOREIGN KEY (codigo_material) REFERENCES materiales(codigo),
+            FOREIGN KEY (rut_socio) REFERENCES socios(rut),
+            FOREIGN KEY (id_multa) REFERENCES multas(id)
+        );
+    """)
+
     # 5. Tabla Préstamos (Cabecera de transacción)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS prestamos (
@@ -99,10 +118,46 @@ def inicializar_base_datos():
             codigo_material TEXT NOT NULL,
             fecha_vencimiento TEXT NOT NULL,
             renovaciones_usadas INTEGER DEFAULT 0,
+            fecha_devolucion TEXT,
+            dias_multa_calculados INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (id_prestamo) REFERENCES prestamos(id) ON DELETE CASCADE,
             FOREIGN KEY (codigo_material) REFERENCES materiales(codigo)
         );
     """)
+
+    cursor.execute("PRAGMA table_info(detalle_prestamos);")
+    columnas_detalle = {fila[1] for fila in cursor.fetchall()}
+    migrar_prestamos_existentes = "fecha_devolucion" not in columnas_detalle
+
+    if migrar_prestamos_existentes:
+        cursor.execute("ALTER TABLE detalle_prestamos ADD COLUMN fecha_devolucion TEXT;")
+    if "dias_multa_calculados" not in columnas_detalle:
+        cursor.execute("""
+            ALTER TABLE detalle_prestamos
+            ADD COLUMN dias_multa_calculados INTEGER NOT NULL DEFAULT 0;
+        """)
+
+    if migrar_prestamos_existentes:
+        cursor.execute("""
+            UPDATE detalle_prestamos
+            SET fecha_devolucion = date('now', 'localtime')
+            WHERE fecha_devolucion IS NULL
+              AND (
+                  NOT EXISTS (
+                      SELECT 1
+                      FROM materiales m
+                      WHERE m.codigo = detalle_prestamos.codigo_material
+                        AND m.estado = 'Prestado'
+                  )
+                  OR id <> (
+                      SELECT MAX(dp.id)
+                      FROM detalle_prestamos dp
+                      JOIN materiales m ON m.codigo = dp.codigo_material
+                      WHERE dp.codigo_material = detalle_prestamos.codigo_material
+                        AND m.estado = 'Prestado'
+                  )
+              );
+        """)
 
     conexion.commit()
 
@@ -112,11 +167,36 @@ def inicializar_base_datos():
         cursor.execute("""
             INSERT INTO empleados (id_empleado, rut, nombre, clave_acceso, rol)
             VALUES (?, ?, ?, ?, ?)
-        """, ("EMP01", "11111111-1", "Ana González", "admin123", "Bibliotecaria"))
+        """, ("ADM01", "11111111-1", "Ana González", hashear_clave("admin123"), "Administradora"))
         cursor.execute("""
             INSERT INTO empleados (id_empleado, rut, nombre, clave_acceso, rol)
             VALUES (?, ?, ?, ?, ?)
-        """, ("ADM01", "22222222-2", "María Cordillera", "root123", "Administradora"))
+        """, ("EMP01", "22222222-2", "María Cordillera", hashear_clave("root123"), "Bibliotecaria"))
+
+    # Corrige los roles de las cuentas de demostración creadas por versiones anteriores.
+    cursor.execute("""
+        UPDATE empleados
+        SET rol = 'Administradora'
+        WHERE id_empleado = 'EMP01'
+          AND rut = '11111111-1'
+          AND rol = 'Bibliotecaria'
+    """)
+    cursor.execute("""
+        UPDATE empleados
+        SET rol = 'Bibliotecaria'
+        WHERE id_empleado = 'ADM01'
+          AND rut = '22222222-2'
+          AND rol = 'Administradora'
+    """)
+
+    # Migra las claves existentes en texto plano durante la actualización.
+    cursor.execute("SELECT id_empleado, clave_acceso FROM empleados;")
+    for id_empleado, clave in cursor.fetchall():
+        if not es_hash_clave(clave):
+            cursor.execute(
+                "UPDATE empleados SET clave_acceso = ? WHERE id_empleado = ?",
+                (hashear_clave(clave), id_empleado),
+            )
 
     cursor.execute("SELECT COUNT(*) FROM socios;")
     if cursor.fetchone()[0] == 0:

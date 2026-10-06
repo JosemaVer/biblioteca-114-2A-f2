@@ -2,20 +2,201 @@
 DAO para Préstamos y Detalle de Préstamos.
 Gestiona la transacción completa de préstamo y la persistencia de sus líneas de detalle.
 """
+import math
+from datetime import date
 from dao.conexion import obtener_conexion
-from dao.socio_dao import SocioDAO
-from dao.material_dao import MaterialDAO
 from model.prestamo import Prestamo
-from model.detalle_prestamo import DetallePrestamo
 from model.roles import Bibliotecaria, Administradora
 from model.empleado import Empleado
 from model.estados import EstadoMaterial
+from services.passwords import hashear_clave
 
 
 class PrestamoDAO:
     """
     Data Access Object para registrar y consultar transacciones de préstamo en SQLite.
     """
+    MULTA_DIARIA_POR_TIPO = {
+        "Libro": 1000,
+        "Revista": 500,
+        "Multimedia": 1500,
+    }
+    PORCENTAJES_DANO = {
+        "Leve": 25,
+        "Moderado": 50,
+        "Grave": 75,
+        "Pérdida total": 100,
+    }
+
+    @staticmethod
+    def _aplicar_multa_atraso(cursor, fila: tuple, fecha_actual: date) -> dict | None:
+        id_detalle, rut_socio, codigo, titulo, tipo, vencimiento, dias_calculados = fila
+        dias_atraso = (fecha_actual - date.fromisoformat(vencimiento)).days
+        dias_nuevos = dias_atraso - dias_calculados
+        if dias_nuevos <= 0:
+            return None
+
+        monto = dias_nuevos * PrestamoDAO.MULTA_DIARIA_POR_TIPO[tipo]
+        cursor.execute("""
+            INSERT INTO multas (rut_socio, monto, estado, motivo)
+            VALUES (?, ?, 'Pendiente', ?)
+        """, (
+            rut_socio,
+            monto,
+            f"Atraso de {titulo} ({codigo}): {dias_nuevos} día(s) adicionales",
+        ))
+        cursor.execute("""
+            UPDATE detalle_prestamos
+            SET dias_multa_calculados = ?
+            WHERE id = ?
+        """, (dias_atraso, id_detalle))
+
+        return {"rut_socio": rut_socio, "monto": monto, "dias": dias_nuevos}
+
+    @staticmethod
+    def procesar_multas_atraso(fecha_actual: date | None = None) -> list[dict]:
+        """Registra los días de atraso aún no cobrados de todos los préstamos activos."""
+        hoy = fecha_actual or date.today()
+        conexion = obtener_conexion()
+        cursor = conexion.cursor()
+
+        try:
+            cursor.execute("""
+                SELECT dp.id, p.rut_socio, m.codigo, m.titulo, m.tipo,
+                       dp.fecha_vencimiento, dp.dias_multa_calculados
+                FROM detalle_prestamos dp
+                JOIN prestamos p ON p.id = dp.id_prestamo
+                JOIN materiales m ON m.codigo = dp.codigo_material
+                WHERE dp.fecha_devolucion IS NULL
+                  AND m.estado = ?
+                ORDER BY dp.id
+            """, (EstadoMaterial.PRESTADO.value,))
+            filas = cursor.fetchall()
+            multas = []
+            for fila in filas:
+                multa = PrestamoDAO._aplicar_multa_atraso(cursor, fila, hoy)
+                if multa is not None:
+                    multas.append(multa)
+            conexion.commit()
+            return multas
+        except Exception:
+            conexion.rollback()
+            raise
+        finally:
+            conexion.close()
+
+    @staticmethod
+    def registrar_dano(
+        codigo_material: str,
+        rut_socio: str,
+        categoria: str,
+        descripcion: str,
+        valor_reposicion_clp: float,
+    ) -> dict:
+        """Registra el daño, su multa y la devolución del material en una transacción."""
+        if categoria not in PrestamoDAO.PORCENTAJES_DANO:
+            raise ValueError(f"Categoría de daño no reconocida: {categoria}")
+        if not math.isfinite(valor_reposicion_clp) or valor_reposicion_clp <= 0:
+            raise ValueError("El valor de reposición debe ser un monto finito mayor que cero.")
+        if not descripcion.strip():
+            raise ValueError("La descripción del daño no puede quedar vacía.")
+
+        codigo = codigo_material.strip().upper()
+        hoy = date.today()
+        porcentaje = PrestamoDAO.PORCENTAJES_DANO[categoria]
+        monto_multa = int(round(valor_reposicion_clp * porcentaje / 100))
+        estado_final = (
+            EstadoMaterial.EXTRAVIADO
+            if categoria == "Pérdida total"
+            else EstadoMaterial.DISPONIBLE
+        )
+        conexion = obtener_conexion()
+        cursor = conexion.cursor()
+
+        try:
+            cursor.execute(
+                "SELECT estado FROM materiales WHERE codigo = ?",
+                (codigo,),
+            )
+            material = cursor.fetchone()
+            if not material:
+                raise ValueError(f"No existe el material '{codigo}'.")
+            if material[0] == EstadoMaterial.EXTRAVIADO.value:
+                raise ValueError(f"El material '{codigo}' ya está registrado como extraviado.")
+
+            cursor.execute("""
+                SELECT dp.id, p.rut_socio, m.codigo, m.titulo, m.tipo,
+                       dp.fecha_vencimiento, dp.dias_multa_calculados
+                FROM detalle_prestamos dp
+                JOIN prestamos p ON p.id = dp.id_prestamo
+                JOIN materiales m ON m.codigo = dp.codigo_material
+                WHERE dp.codigo_material = ?
+                  AND dp.fecha_devolucion IS NULL
+                  AND m.estado = ?
+                ORDER BY dp.id DESC
+                LIMIT 1
+            """, (codigo, EstadoMaterial.PRESTADO.value))
+            detalle_activo = cursor.fetchone()
+            multa_atraso = None
+            if detalle_activo:
+                if detalle_activo[1] != rut_socio:
+                    raise ValueError(
+                        f"El material '{codigo}' está prestado a otro socio "
+                        f"({detalle_activo[1]})."
+                    )
+                multa_atraso = PrestamoDAO._aplicar_multa_atraso(
+                    cursor, detalle_activo, hoy
+                )
+                cursor.execute("""
+                    UPDATE detalle_prestamos
+                    SET fecha_devolucion = ?
+                    WHERE id = ?
+                """, (hoy.isoformat(), detalle_activo[0]))
+
+            cursor.execute("""
+                INSERT INTO multas (rut_socio, monto, estado, motivo)
+                VALUES (?, ?, 'Pendiente', ?)
+            """, (
+                rut_socio,
+                monto_multa,
+                f"Daño {categoria.lower()} en {codigo}: {descripcion.strip()}",
+            ))
+            id_multa = cursor.lastrowid
+            cursor.execute("""
+                INSERT INTO danos_materiales (
+                    codigo_material, rut_socio, categoria, descripcion,
+                    porcentaje, valor_reposicion_clp, monto_multa,
+                    fecha_registro, id_multa
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                codigo,
+                rut_socio,
+                categoria,
+                descripcion.strip(),
+                porcentaje,
+                valor_reposicion_clp,
+                monto_multa,
+                hoy.isoformat(),
+                id_multa,
+            ))
+            cursor.execute("""
+                UPDATE materiales
+                SET estado = ?
+                WHERE codigo = ?
+            """, (estado_final.value, codigo))
+            conexion.commit()
+            return {
+                "id_multa": id_multa,
+                "monto_multa": monto_multa,
+                "porcentaje": porcentaje,
+                "multa_atraso": multa_atraso,
+                "estado": estado_final.value,
+            }
+        except Exception:
+            conexion.rollback()
+            raise
+        finally:
+            conexion.close()
 
     @staticmethod
     def guardar_prestamo(prestamo: Prestamo) -> int:
@@ -173,7 +354,12 @@ class PrestamoDAO:
         conexion = obtener_conexion()
         cursor = conexion.cursor()
 
-        cursor.execute("SELECT rut, nombre, id_empleado, clave_acceso, rol FROM empleados ORDER BY id_empleado ASC")
+        cursor.execute("""
+            SELECT rut, nombre, id_empleado, clave_acceso, rol
+            FROM empleados
+            ORDER BY CASE WHEN rol = 'Administradora' THEN 0 ELSE 1 END,
+                     id_empleado ASC
+        """)
         filas = cursor.fetchall()
         conexion.close()
 
@@ -187,6 +373,59 @@ class PrestamoDAO:
         return empleados
 
     @staticmethod
-    def devolver_material(codigo_material: str) -> bool:
-        """Marca un material como DISPONIBLE nuevamente."""
-        return MaterialDAO.actualizar_estado(codigo_material, EstadoMaterial.DISPONIBLE)
+    def actualizar_clave_acceso(id_empleado: str, clave: str) -> bool:
+        """Actualiza la contraseña de un empleado guardando únicamente su hash."""
+        conexion = obtener_conexion()
+        cursor = conexion.cursor()
+        cursor.execute(
+            "UPDATE empleados SET clave_acceso = ? WHERE id_empleado = ?",
+            (hashear_clave(clave), id_empleado.strip().upper()),
+        )
+        actualizado = cursor.rowcount > 0
+        conexion.commit()
+        conexion.close()
+        return actualizado
+
+    @staticmethod
+    def devolver_material(codigo_material: str) -> int | None:
+        """Cobra los días de atraso pendientes y marca el material como devuelto."""
+        hoy = date.today()
+        conexion = obtener_conexion()
+        cursor = conexion.cursor()
+
+        try:
+            cursor.execute("""
+                SELECT dp.id, p.rut_socio, m.codigo, m.titulo, m.tipo,
+                       dp.fecha_vencimiento, dp.dias_multa_calculados
+                FROM detalle_prestamos dp
+                JOIN prestamos p ON p.id = dp.id_prestamo
+                JOIN materiales m ON m.codigo = dp.codigo_material
+                WHERE dp.codigo_material = ?
+                  AND dp.fecha_devolucion IS NULL
+                  AND m.estado = ?
+                ORDER BY dp.id DESC
+                LIMIT 1
+            """, (codigo_material.strip().upper(), EstadoMaterial.PRESTADO.value))
+            fila = cursor.fetchone()
+            if not fila:
+                conexion.rollback()
+                return None
+
+            multa = PrestamoDAO._aplicar_multa_atraso(cursor, fila, hoy)
+            cursor.execute("""
+                UPDATE detalle_prestamos
+                SET fecha_devolucion = ?
+                WHERE id = ?
+            """, (hoy.isoformat(), fila[0]))
+            cursor.execute("""
+                UPDATE materiales
+                SET estado = ?
+                WHERE codigo = ?
+            """, (EstadoMaterial.DISPONIBLE.value, codigo_material.strip().upper()))
+            conexion.commit()
+            return multa["monto"] if multa else 0
+        except Exception:
+            conexion.rollback()
+            raise
+        finally:
+            conexion.close()
