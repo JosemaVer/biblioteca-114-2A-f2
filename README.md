@@ -40,13 +40,13 @@ biblioteca-114-2A-f2/
 │   └── prestamo_dao.py         <-- Transacciones atómicas de Préstamos y Detalles
 │
 ├── services/                   <-- CAPA DE INTEGRACIÓN EXTERNA
-│   └── api_dolar.py            <-- Consumo de mindicador.cl con timeout y fallback
+│   ├── api_dolar.py            <-- Consumo de mindicador.cl con timeout y fallback
+│   └── passwords.py            <-- Hash y verificación de contraseñas
 │
-├── data/                       <-- BASE DE DATOS LOCAL
-│   └── biblioteca.db           <-- Archivo de base de datos SQLite
+├── data/                       <-- Datos locales creados al iniciar
+│   └── biblioteca.db           <-- Base SQLite local (no se versiona)
 │
 ├── main.py                     <-- Menú interactivo CLI con control de errores
-├── test_biblioteca.py          <-- Suite de pruebas unitarias automatizadas
 ├── requirements.txt            <-- Dependencias del proyecto (requests)
 └── README.md                   <-- Documentación y justificaciones de seguridad
 ```
@@ -71,10 +71,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### 4. Ejecutar las pruebas unitarias
-```bash
-python test_biblioteca.py
-```
+En el primer inicio se crea `data/biblioteca.db` con sus tablas, cuentas de demostración y datos de ejemplo si las tablas correspondientes están vacías. Esta base de datos es local y está excluida de Git: cada clon mantiene sus propios registros. Los datos ingresados en un computador no se transfieren al de otro usuario.
 
 ---
 
@@ -135,6 +132,7 @@ python test_biblioteca.py
 | **02/10/2026** | Arquitectura Final Evaluada (Sumativa 2) | Implementación de `model/`, `dao/` (SQLite parametrizado), consumo API dólar con timeout, validación Módulo 11, excepciones propias y suite de tests. | 100% Operativo 🚀 |
 | **04/10/2026** | Refactorización de la arquitectura | Separación en módulos `model/`, `dao/` y `services/`; actualización del CLI, persistencia SQLite y pruebas. | Completado |
 | **05/10/2026** | Corrección de roles y autenticación | Migración de cuentas de demostración para asignar correctamente el rol de Administradora; credenciales con hash, orden del listado y pruebas aisladas en SQLite. Se documentó también la ejecución normal del sistema sin reutilizar un lanzador de depuración obsoleto. | Completado |
+| **06/10/2026** | Consolidación de versión para entrega | Pago de multas mediante selección desde la lista de pendientes, carga de socios con RUT históricos y actualización de instrucciones, persistencia local y bitácora. Se excluyeron los scripts de pruebas y la previsualización de arquitectura de la rama `main`. | Completado |
 
 ### 📝 Registro Detallado de Sesiones
 
@@ -158,3 +156,13 @@ python test_biblioteca.py
   - Se añadieron pruebas con una base SQLite temporal para verificar la migración, el rol devuelto al autenticar y las credenciales con contraseña hasheada.
   - Se documentó cómo iniciar `main.py` directamente con el intérprete del entorno virtual cuando se reutiliza un comando de depuración `debugpy` que ya no tiene un proceso escuchando.
 - **Verificación:** Las pruebas enfocadas de creación de cuentas y migración de roles finalizaron correctamente; Pylance no reportó errores en los archivos modificados.
+
+#### Sesión 6: Consolidación de la versión para entrega (06/10/2026)
+
+- **Actividades realizadas:**
+  - Se actualizó el pago de una multa específica para mostrar las multas pendientes y permitir elegir su ID, rechazando identificadores que no estén en la lista.
+  - Se ajustó la carga de socios desde SQLite para admitir RUT históricos ya almacenados, manteniendo la validación al registrar socios nuevos.
+  - Se integró en `main` la versión de desarrollo y se retiraron de la entrega los dos archivos de pruebas y la previsualización de arquitectura.
+  - Se actualizaron las instrucciones de instalación y la documentación de la base SQLite local, además de esta bitácora.
+- **Verificación:** Antes de retirar los scripts de prueba de la versión de entrega, se ejecutaron las 10 pruebas automatizadas y se verificó el flujo de selección de multas.
+- **Entregable:** Versión consolidada en la rama `main`.
