@@ -12,6 +12,8 @@ import sys
 import os
 import math
 import re
+from collections.abc import Callable
+from typing import Any
 
 # Agregamos la ruta base para asegurar importaciones relativas limpias
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -41,21 +43,81 @@ EMPLEADO_ACTUAL: Empleado | None = None
 # FUNCIONES AUXILIARES DE ENTRADA Y VALIDACIÓN
 # =============================================================================
 
+class VolverPaso(Exception):
+    """Indica que el usuario quiere volver al campo anterior del formulario."""
+
+
+def leer_entrada(mensaje: str, *, conservar_espacios: bool = False) -> str:
+    """Lee una entrada admitiendo el comando de navegación VOLVER."""
+    valor = input(f"{mensaje} [VOLVER para regresar]: ")
+    if valor.strip().upper() == "VOLVER":
+        raise VolverPaso
+    return valor if conservar_espacios else valor.strip()
+
+
+def ejecutar_formulario(
+    pasos: list[
+        tuple[
+            str,
+            Callable[[dict[str, Any]], Any],
+            Callable[[dict[str, Any]], bool] | None,
+        ]
+    ],
+) -> dict[str, Any] | None:
+    """Captura campos en orden y permite retroceder hasta el paso anterior."""
+    valores: dict[str, Any] = {}
+    indice = 0
+
+    while True:
+        pasos_activos = [
+            paso for paso in pasos
+            if paso[2] is None or paso[2](valores)
+        ]
+        nombres_activos = {paso[0] for paso in pasos_activos}
+        for nombre in valores.keys() - nombres_activos:
+            del valores[nombre]
+        if indice >= len(pasos_activos):
+            return valores
+
+        nombre, leer, _ = pasos_activos[indice]
+        try:
+            valores[nombre] = leer(valores)
+            indice += 1
+        except VolverPaso:
+            if indice == 0:
+                return None
+            indice -= 1
+
+
+def leer_opcion(mensaje: str, opciones: set[str]) -> str:
+    """Lee una opción perteneciente al conjunto permitido."""
+    while True:
+        entrada = leer_entrada(mensaje).upper()
+        if entrada in opciones:
+            return entrada
+        print("[!] Opción no válida. Intente nuevamente.")
+
+
+def leer_confirmacion(mensaje: str) -> str:
+    """Lee una confirmación S/N."""
+    return leer_opcion(mensaje, {"S", "N"})
+
+
 def leer_texto_no_vacio(mensaje: str) -> str:
     """Solicita un texto y no permite valores vacíos ni solo espacios."""
     while True:
-        valor = input(mensaje).strip()
+        valor = leer_entrada(mensaje)
         if valor:
             return valor
         print("[!] Error: El campo no puede quedar en blanco. Intente nuevamente.")
 
 
-def leer_texto_no_vacio_o_cancelar(mensaje: str) -> str | None:
-    """Solicita un texto no vacío o permite cancelar ingresando 0."""
+def leer_texto_no_vacio_o_cancelar(mensaje: str) -> str:
+    """Solicita un texto; conserva 0 como comando heredado para retroceder."""
     while True:
-        valor = input(mensaje).strip()
+        valor = leer_entrada(mensaje)
         if valor == "0":
-            return None
+            raise VolverPaso
         if valor:
             return valor
         print("[!] Error: El campo no puede quedar en blanco. Intente nuevamente.")
@@ -64,7 +126,7 @@ def leer_texto_no_vacio_o_cancelar(mensaje: str) -> str | None:
 def leer_entero_positivo(mensaje: str) -> int:
     """Solicita un número entero positivo."""
     while True:
-        entrada = input(mensaje).strip()
+        entrada = leer_entrada(mensaje)
         try:
             numero = int(entrada)
             if numero > 0:
@@ -77,7 +139,7 @@ def leer_entero_positivo(mensaje: str) -> int:
 def leer_flotante_no_negativo(mensaje: str) -> float:
     """Solicita un número flotante mayor o igual a 0."""
     while True:
-        entrada = input(mensaje).strip().replace(",", ".")
+        entrada = leer_entrada(mensaje).replace(",", ".")
         try:
             numero = float(entrada)
             if numero >= 0:
@@ -90,7 +152,7 @@ def leer_flotante_no_negativo(mensaje: str) -> float:
 def leer_rut_validado(mensaje: str) -> str:
     """Solicita un RUT y valida el dígito verificador mediante Módulo 11."""
     while True:
-        entrada = input(mensaje).strip()
+        entrada = leer_entrada(mensaje).upper()
         if Persona.validar_rut(entrada):
             return Persona.formatear_rut(entrada)
         print(f"[!] Error: El RUT '{entrada}' es INVÁLIDO (dígito verificador incorrecto o formato inválido).")
@@ -147,7 +209,10 @@ def iniciar_sesion():
             continue
 
         empleado = PrestamoDAO.obtener_empleado_por_rut(rut)
-        clave = input("Contraseña: ")
+        try:
+            clave = leer_entrada("Contraseña:", conservar_espacios=True)
+        except VolverPaso:
+            continue
         if empleado and empleado.autenticar(clave):
             EMPLEADO_ACTUAL = empleado
             print(
@@ -176,24 +241,49 @@ def menu_sesion():
         print("  0. Volver al menú principal")
         print("="*60)
 
-        opc = input("Seleccione una opción [0-2]: ").strip()
+        try:
+            opc = leer_entrada("Seleccione una opción [0-2]:")
+        except VolverPaso:
+            break
 
         if opc == "1":
             iniciar_sesion()
         elif opc == "2":
-            clave_actual = input("Contraseña actual: ")
-            if not EMPLEADO_ACTUAL.autenticar(clave_actual):
-                print("[!] La contraseña actual es incorrecta.")
-                continue
+            def leer_clave_actual(_: dict[str, Any]) -> str:
+                while True:
+                    clave = leer_entrada("Contraseña actual:", conservar_espacios=True)
+                    if EMPLEADO_ACTUAL.autenticar(clave):
+                        return clave
+                    print("[!] La contraseña actual es incorrecta.")
 
-            nueva_clave = input("Nueva contraseña (mínimo 8 caracteres): ")
-            if len(nueva_clave) < 8:
-                print("[!] La contraseña debe tener al menos 8 caracteres.")
+            def leer_nueva_clave(_: dict[str, Any]) -> str:
+                while True:
+                    clave = leer_entrada(
+                        "Nueva contraseña (mínimo 8 caracteres):",
+                        conservar_espacios=True,
+                    )
+                    if len(clave) >= 8:
+                        return clave
+                    print("[!] La contraseña debe tener al menos 8 caracteres.")
+
+            def leer_confirmacion_clave(valores: dict[str, Any]) -> str:
+                while True:
+                    confirmacion = leer_entrada(
+                        "Repita la nueva contraseña:",
+                        conservar_espacios=True,
+                    )
+                    if confirmacion == valores["nueva_clave"]:
+                        return confirmacion
+                    print("[!] Las contraseñas no coinciden.")
+
+            valores = ejecutar_formulario([
+                ("clave_actual", leer_clave_actual, None),
+                ("nueva_clave", leer_nueva_clave, None),
+                ("confirmacion", leer_confirmacion_clave, None),
+            ])
+            if valores is None:
                 continue
-            confirmacion = input("Repita la nueva contraseña: ")
-            if nueva_clave != confirmacion:
-                print("[!] Las contraseñas no coinciden.")
-                continue
+            nueva_clave = valores["nueva_clave"]
 
             if PrestamoDAO.actualizar_clave_acceso(
                 EMPLEADO_ACTUAL.id_empleado,
@@ -225,46 +315,99 @@ def menu_crear_material():
     print("2. Revista")
     print("3. Multimedia (DVD / BluRay)")
     
-    opc = input("Seleccione el tipo de material [1-3]: ").strip()
-    codigo = leer_texto_no_vacio("Ingrese código único del material (ej. LIB03, REV02): ").upper()
-    
-    if MaterialDAO.obtener_por_codigo(codigo) is not None:
-        print(f"[!] Error: Ya existe un material registrado con el código '{codigo}'.")
-        return
+    def leer_tipo(_: dict[str, Any]) -> str:
+        return leer_opcion("Seleccione el tipo de material [1-3]:", {"1", "2", "3"})
 
-    titulo = leer_texto_no_vacio("Ingrese título del material: ")
+    def leer_codigo_unico(_: dict[str, Any]) -> str:
+        while True:
+            codigo = leer_texto_no_vacio(
+                "Ingrese código único del material (ej. LIB03, REV02):"
+            ).upper()
+            if MaterialDAO.obtener_por_codigo(codigo) is None:
+                return codigo
+            print(f"[!] Error: Ya existe un material registrado con el código '{codigo}'.")
 
-    if opc == "1":
+    def leer_moneda_libro(_: dict[str, Any]) -> str:
         print("\n¿El libro es nacional o importado/extranjero?")
         print("1. Nacional (precio fijo en pesos CLP)")
         print("2. Extranjero (adquirido en dólares USD)")
-        tipo_precio = input("Opción [1/2]: ").strip()
-        
-        if tipo_precio == "2":
-            es_extranjero = True
-            valor_usd = leer_flotante_no_negativo("Ingrese valor de reposición en Dólares (USD): ")
-            valor_pesos = 0
-        else:
-            es_extranjero = False
-            valor_usd = 0.0
-            valor_pesos = int(leer_flotante_no_negativo("Ingrese valor de reposición en Pesos (CLP): "))
-            
-        nuevo_mat = Libro(codigo=codigo, titulo=titulo, es_extranjero=es_extranjero,
-                          valor_reposicion_usd=valor_usd, valor_reposicion_pesos=valor_pesos)
+        return leer_opcion("Opción [1/2]:", {"1", "2"})
 
-    elif opc == "2":
-        edicion = leer_entero_positivo("Ingrese número de edición: ")
-        valor_usd = leer_flotante_no_negativo("Ingrese valor de reposición estimado (USD): ")
-        nuevo_mat = Revista(codigo=codigo, titulo=titulo, numero_edicion=edicion, valor_reposicion_usd=valor_usd)
+    def leer_valor_clp(_: dict[str, Any]) -> float:
+        while True:
+            valor = leer_flotante_no_negativo(
+                "Ingrese valor de reposición en Pesos (CLP):"
+            )
+            if valor.is_integer():
+                return valor
+            print("[!] El precio en pesos debe ser un número entero.")
 
-    elif opc == "3":
-        formato = leer_texto_no_vacio("Ingrese formato audiovisual (ej. DVD, BluRay, CD): ").upper()
-        valor_usd = leer_flotante_no_negativo("Ingrese valor de reposición estimado (USD): ")
-        nuevo_mat = Multimedia(codigo=codigo, titulo=titulo, formato=formato, valor_reposicion_usd=valor_usd)
-
-    else:
-        print("[!] Opción no válida. Operación cancelada.")
+    valores = ejecutar_formulario([
+        ("tipo", leer_tipo, None),
+        ("codigo", leer_codigo_unico, None),
+        ("titulo", lambda _: leer_texto_no_vacio("Ingrese título del material:"), None),
+        (
+            "tipo_precio",
+            leer_moneda_libro,
+            lambda datos: datos.get("tipo") == "1",
+        ),
+        (
+            "edicion",
+            lambda _: leer_entero_positivo("Ingrese número de edición:"),
+            lambda datos: datos.get("tipo") == "2",
+        ),
+        (
+            "formato",
+            lambda _: leer_texto_no_vacio(
+                "Ingrese formato audiovisual (ej. DVD, BluRay, CD):"
+            ).upper(),
+            lambda datos: datos.get("tipo") == "3",
+        ),
+        (
+            "valor_usd",
+            lambda _: leer_flotante_no_negativo(
+                "Ingrese valor de reposición en Dólares (USD):"
+            ),
+            lambda datos: (
+                datos.get("tipo") == "1" and datos.get("tipo_precio") == "2"
+            ) or datos.get("tipo") in {"2", "3"},
+        ),
+        (
+            "valor_pesos",
+            leer_valor_clp,
+            lambda datos: (
+                datos.get("tipo") == "1" and datos.get("tipo_precio") == "1"
+            ),
+        ),
+    ])
+    if valores is None:
         return
+
+    codigo = valores["codigo"]
+    titulo = valores["titulo"]
+    opc = valores["tipo"]
+    if opc == "1":
+        nuevo_mat = Libro(
+            codigo=codigo,
+            titulo=titulo,
+            es_extranjero=valores["tipo_precio"] == "2",
+            valor_reposicion_usd=valores.get("valor_usd", 0.0),
+            valor_reposicion_pesos=int(valores.get("valor_pesos", 0)),
+        )
+    elif opc == "2":
+        nuevo_mat = Revista(
+            codigo=codigo,
+            titulo=titulo,
+            numero_edicion=valores["edicion"],
+            valor_reposicion_usd=valores["valor_usd"],
+        )
+    else:
+        nuevo_mat = Multimedia(
+            codigo=codigo,
+            titulo=titulo,
+            formato=valores["formato"],
+            valor_reposicion_usd=valores["valor_usd"],
+        )
 
     MaterialDAO.crear(nuevo_mat)
     print(f"\n[OK] Material '{nuevo_mat.titulo}' (Código: {nuevo_mat.codigo}) dado de alta con éxito.")
@@ -315,14 +458,30 @@ def menu_modificar_material():
     print("\n" + "="*50)
     print("  MODIFICAR MATERIAL")
     print("="*50)
-    codigo = leer_texto_no_vacio("Ingrese el código del material a modificar: ").upper()
-    mat = MaterialDAO.obtener_por_codigo(codigo)
-    if not mat:
-        print(f"[!] Error: No se encontró ningún material con el código '{codigo}'.")
+    def leer_material(_: dict[str, Any]):
+        while True:
+            codigo = leer_texto_no_vacio(
+                "Ingrese el código del material a modificar:"
+            ).upper()
+            mat = MaterialDAO.obtener_por_codigo(codigo)
+            if mat:
+                return mat
+            print(f"[!] Error: No se encontró ningún material con el código '{codigo}'.")
+
+    def leer_titulo(datos: dict[str, Any]) -> str:
+        print(f"Título actual: {datos['material'].titulo}")
+        return leer_texto_no_vacio("Ingrese el nuevo título:")
+
+    valores = ejecutar_formulario([
+        ("material", leer_material, None),
+        ("titulo", leer_titulo, None),
+    ])
+    if valores is None:
         return
 
-    print(f"Título actual: {mat.titulo}")
-    nuevo_titulo = leer_texto_no_vacio("Ingrese el nuevo título: ")
+    mat = valores["material"]
+    nuevo_titulo = valores["titulo"]
+    codigo = mat.codigo
     MaterialDAO.actualizar_titulo(codigo, nuevo_titulo)
     print(f"[OK] Título del material '{codigo}' actualizado a '{nuevo_titulo}'.")
 
@@ -335,28 +494,44 @@ def menu_actualizar_precio_material():
     print("\n" + "="*50)
     print("  ACTUALIZAR PRECIO DE MATERIAL")
     print("="*50)
-    codigo = leer_texto_no_vacio("Ingrese el código del material: ").upper()
-    material = MaterialDAO.obtener_por_codigo(codigo)
-    if not material:
-        print(f"[!] Error: No se encontró ningún material con el código '{codigo}'.")
-        return
+    def leer_material(_: dict[str, Any]):
+        while True:
+            codigo = leer_texto_no_vacio("Ingrese el código del material:").upper()
+            material = MaterialDAO.obtener_por_codigo(codigo)
+            if material:
+                return material
+            print(f"[!] Error: No se encontró ningún material con el código '{codigo}'.")
 
-    if isinstance(material, Libro):
-        if material.es_extranjero:
-            print(f"Valor actual: ${material.valor_reposicion_usd:,.2f} USD")
-            valor = leer_flotante_no_negativo("Ingrese el nuevo valor en dólares (USD): ")
-        else:
+    def precio_material(datos: dict[str, Any]) -> float:
+        material = datos["material"]
+        if isinstance(material, Libro) and not material.es_extranjero:
             print(f"Valor actual: ${material.valor_reposicion_pesos:,.0f} CLP")
             while True:
                 valor = leer_flotante_no_negativo(
-                    "Ingrese el nuevo valor en pesos (CLP, sin centavos): "
+                    "Ingrese el nuevo valor en pesos (CLP, sin centavos):"
                 )
                 if valor.is_integer():
-                    break
+                    return valor
                 print("[!] El precio en pesos debe ser un número entero.")
-    else:
+        if isinstance(material, Libro):
+            print(f"Valor actual: ${material.valor_reposicion_usd:,.2f} USD")
+            return leer_flotante_no_negativo(
+                "Ingrese el nuevo valor en dólares (USD):"
+            )
         print(f"Valor actual: ${material.valor_reposicion_usd:,.2f} USD")
-        valor = leer_flotante_no_negativo("Ingrese el nuevo valor en dólares (USD): ")
+        return leer_flotante_no_negativo(
+            "Ingrese el nuevo valor en dólares (USD):"
+        )
+
+    valores = ejecutar_formulario([
+        ("material", leer_material, None),
+        ("valor", precio_material, None),
+    ])
+    if valores is None:
+        return
+
+    material = valores["material"]
+    valor = valores["valor"]
 
     actualizado = MaterialDAO.actualizar_precio_reposicion(
         material.codigo,
@@ -377,16 +552,33 @@ def menu_eliminar_material():
     print("\n" + "="*50)
     print("  ELIMINAR MATERIAL DEL CATÁLOGO")
     print("="*50)
-    codigo = leer_texto_no_vacio("Ingrese el código del material a eliminar: ").upper()
-    mat = MaterialDAO.obtener_por_codigo(codigo)
-    if not mat:
-        print(f"[!] Error: No se encontró ningún material con el código '{codigo}'.")
+    def leer_material(_: dict[str, Any]):
+        while True:
+            codigo = leer_texto_no_vacio("Ingrese el código del material a eliminar:").upper()
+            mat = MaterialDAO.obtener_por_codigo(codigo)
+            if mat:
+                return mat
+            print(f"[!] Error: No se encontró ningún material con el código '{codigo}'.")
+
+    valores = ejecutar_formulario([
+        ("material", leer_material, None),
+        (
+            "confirmacion",
+            lambda datos: leer_confirmacion(
+                f"¿Está seguro de eliminar permanentemente "
+                f"'{datos['material'].titulo}' ({datos['material'].codigo})? [S/N]:"
+            ),
+            None,
+        ),
+    ])
+    if valores is None:
         return
 
-    confirmar = input(f"¿Está seguro de eliminar permanentemente '{mat.titulo}' ({mat.codigo})? [S/N]: ").strip().upper()
+    mat = valores["material"]
+    confirmar = valores["confirmacion"]
     if confirmar == "S":
-        MaterialDAO.eliminar(codigo)
-        print(f"[OK] Material '{codigo}' eliminado exitosamente del catálogo.")
+        MaterialDAO.eliminar(mat.codigo)
+        print(f"[OK] Material '{mat.codigo}' eliminado exitosamente del catálogo.")
     else:
         print("Operación cancelada.")
 
@@ -413,7 +605,12 @@ def menu_catalogo():
         print("  0. Volver al menú principal")
         print("="*60)
 
-        opc = input(f"Seleccione una opción [0-{len(opciones)}]: ").strip()
+        try:
+            opc = leer_entrada(
+                f"Seleccione una opción [0-{len(opciones)}]:"
+            )
+        except VolverPaso:
+            break
         if opc == "0":
             break
         if opc.isdigit() and 1 <= int(opc) <= len(opciones):
@@ -432,38 +629,48 @@ def menu_registrar_socio():
     print("  REGISTRAR NUEVO SOCIO")
     print("="*50)
 
-    while True:
-        entrada = leer_texto_no_vacio_o_cancelar(
-            "Ingrese RUT del socio (con o sin puntos/guion; 0 para volver): "
-        )
-        if entrada is None:
-            print("Registro cancelado. Volviendo al menú de socios.")
-            return
-        if Persona.validar_rut(entrada):
+    def leer_rut_nuevo(_: dict[str, Any]) -> str:
+        while True:
+            entrada = leer_texto_no_vacio_o_cancelar(
+                "Ingrese RUT del socio (con o sin puntos/guion; 0 para volver):"
+            )
+            if not Persona.validar_rut(entrada):
+                print(f"[!] Error: El RUT '{entrada}' es INVÁLIDO "
+                      "(dígito verificador incorrecto o formato inválido).")
+                print("    [Ejemplo: 12.345.678-5 o 12345678-5]")
+                continue
             rut = Persona.formatear_rut(entrada)
-            break
-        print(f"[!] Error: El RUT '{entrada}' es INVÁLIDO (dígito verificador incorrecto o formato inválido).")
-        print("    [Ejemplo: 12.345.678-5 o 12345678-5]")
-    
-    if SocioDAO.obtener_por_rut(rut) is not None:
-        print(f"[!] Error: Ya existe un socio registrado con el RUT '{rut}'.")
-        return
+            if SocioDAO.obtener_por_rut(rut) is not None:
+                print(f"[!] Error: Ya existe un socio registrado con el RUT '{rut}'.")
+                continue
+            return rut
 
-    nombre = leer_texto_no_vacio_o_cancelar(
-        "Ingrese nombre completo del socio (0 para volver): "
-    )
-    if nombre is None:
+    valores = ejecutar_formulario([
+        ("rut", leer_rut_nuevo, None),
+        (
+            "nombre",
+            lambda _: leer_texto_no_vacio_o_cancelar(
+                "Ingrese nombre completo del socio (0 para volver):"
+            ),
+            None,
+        ),
+        (
+            "direccion",
+            lambda _: leer_texto_no_vacio_o_cancelar(
+                "Ingrese dirección de residencia (0 para volver):"
+            ),
+            None,
+        ),
+    ])
+    if valores is None:
         print("Registro cancelado. Volviendo al menú de socios.")
         return
 
-    direccion = leer_texto_no_vacio_o_cancelar(
-        "Ingrese dirección de residencia (0 para volver): "
+    nuevo_socio = Socio(
+        rut=valores["rut"],
+        nombre=valores["nombre"],
+        direccion=valores["direccion"],
     )
-    if direccion is None:
-        print("Registro cancelado. Volviendo al menú de socios.")
-        return
-
-    nuevo_socio = Socio(rut=rut, nombre=nombre, direccion=direccion)
     SocioDAO.crear(nuevo_socio)
     print(f"\n[OK] Socio '{nuevo_socio.nombre}' (RUT: {nuevo_socio.rut}) registrado exitosamente.")
 
@@ -474,18 +681,41 @@ def menu_registrar_multa():
     print("  ASIGNAR MULTA MANUAL A SOCIO")
     print("="*60)
 
-    rut = leer_rut_validado("Ingrese RUT del socio: ")
-    socio = SocioDAO.obtener_por_rut(rut)
-    if not socio:
-        print(f"[!] No existe un socio registrado con el RUT '{rut}'.")
+    def leer_socio(_: dict[str, Any]):
+        while True:
+            rut = leer_rut_validado("Ingrese RUT del socio:")
+            socio = SocioDAO.obtener_por_rut(rut)
+            if socio:
+                return socio
+            print(f"[!] No existe un socio registrado con el RUT '{rut}'.")
+
+    def leer_monto(_: dict[str, Any]) -> int:
+        return leer_entero_positivo("Ingrese monto de la multa en CLP:")
+
+    valores = ejecutar_formulario([
+        ("socio", leer_socio, None),
+        ("monto", leer_monto, None),
+        (
+            "motivo",
+            lambda _: leer_texto_no_vacio("Ingrese el motivo de la multa:"),
+            None,
+        ),
+        (
+            "confirmacion",
+            lambda datos: leer_confirmacion(
+                f"¿Confirmar multa de ${datos['monto']:,.0f} CLP "
+                f"a {datos['socio'].nombre}? [S/N]:"
+            ),
+            None,
+        ),
+    ])
+    if valores is None:
         return
 
-    monto = leer_entero_positivo("Ingrese monto de la multa en CLP: ")
-
-    motivo = leer_texto_no_vacio("Ingrese el motivo de la multa: ")
-    confirmar = input(
-        f"¿Confirmar multa de ${monto:,.0f} CLP a {socio.nombre}? [S/N]: "
-    ).strip().upper()
+    socio = valores["socio"]
+    monto = valores["monto"]
+    motivo = valores["motivo"]
+    confirmar = valores["confirmacion"]
     if confirmar != "S":
         print("Operación cancelada.")
         return
@@ -522,7 +752,27 @@ def menu_consultar_multas():
     print("="*60)
     print("1. Ver todas las multas del sistema")
     print("2. Detallar multas de un socio específico por RUT")
-    opc = input("Seleccione una opción [1/2]: ").strip()
+
+    def leer_socio(_: dict[str, Any]):
+        while True:
+            rut = leer_rut_validado("Ingrese RUT del socio a consultar:")
+            socio = SocioDAO.obtener_por_rut(rut)
+            if socio:
+                return socio
+            print(f"[!] Error: No se encontró ningún socio con el RUT '{rut}'.")
+
+    seleccion = ejecutar_formulario([
+        (
+            "opcion",
+            lambda _: leer_opcion("Seleccione una opción [1/2]:", {"1", "2"}),
+            None,
+        ),
+        ("socio", leer_socio, lambda datos: datos.get("opcion") == "2"),
+    ])
+    if seleccion is None:
+        return
+    opc = seleccion["opcion"]
+    socio = seleccion.get("socio")
 
     if opc == "1":
         multas = SocioDAO.listar_todas_las_multas()
@@ -540,12 +790,6 @@ def menu_consultar_multas():
         print("-" * 85)
 
     elif opc == "2":
-        rut = leer_rut_validado("Ingrese RUT del socio a consultar: ")
-        socio = SocioDAO.obtener_por_rut(rut)
-        if not socio:
-            print(f"[!] Error: No se encontró ningún socio con el RUT '{rut}'.")
-            return
-
         print("\n" + "="*80)
         print(f"  HISTORIAL DE MULTAS - SOCIO: {socio.nombre} (RUT: {socio.rut})")
         print("="*80)
@@ -577,82 +821,148 @@ def menu_cobrar_reposicion_libro_perdido():
     print("  REGISTRO DE DAÑO O PÉRDIDA DE MATERIAL")
     print("="*70)
 
-    rut = leer_rut_validado("Ingrese RUT del socio responsable de la pérdida: ")
-    socio = SocioDAO.obtener_por_rut(rut)
-    if not socio:
-        print(f"[!] Error: Socio con RUT '{rut}' no encontrado.")
-        return
+    def leer_socio(_: dict[str, Any]):
+        while True:
+            rut = leer_rut_validado(
+                "Ingrese RUT del socio responsable de la pérdida:"
+            )
+            socio = SocioDAO.obtener_por_rut(rut)
+            if socio:
+                return socio
+            print(f"[!] Error: Socio con RUT '{rut}' no encontrado.")
 
-    codigo = leer_texto_no_vacio("Ingrese código del material extraviado (ej. LIB02): ").upper()
-    mat = MaterialDAO.obtener_por_codigo(codigo)
-    if not mat:
-        print(f"[!] Error: No se encontró material con código '{codigo}'.")
-        return
-
-    print(f"\nMaterial: {mat.titulo} ({mat.__class__.__name__})")
-    print(f"Estado actual: {mat.estado.value}")
-
-    print("\nSeleccione el nivel del daño:")
-    print("1. Leve - rayado o mancha superficial (25%)")
-    print("2. Moderado - falta una hoja o tapa dañada (50%)")
-    print("3. Grave - varias hojas faltantes o daño que dificulta el uso (75%)")
-    print("4. Pérdida total - extraviado o inutilizable (100%)")
-    categoria_opcion = input("Seleccione una opción [1-4]: ").strip()
     categorias = {
         "1": "Leve",
         "2": "Moderado",
         "3": "Grave",
         "4": "Pérdida total",
     }
-    categoria = categorias.get(categoria_opcion)
-    if categoria is None:
-        print("[!] Opción no válida. Operación cancelada.")
-        return
+    def leer_material(_: dict[str, Any]):
+        while True:
+            codigo = leer_texto_no_vacio(
+                "Ingrese código del material extraviado (ej. LIB02):"
+            ).upper()
+            mat = MaterialDAO.obtener_por_codigo(codigo)
+            if mat:
+                return mat
+            print(f"[!] Error: No se encontró material con código '{codigo}'.")
 
-    descripcion = leer_texto_no_vacio(
-        "Describa el daño (ej. falta una hoja, falta la tapa, está rayado): "
-    )
+    def leer_categoria(datos: dict[str, Any]) -> str:
+        mat = datos["material"]
+        print(f"\nMaterial: {mat.titulo} ({mat.__class__.__name__})")
+        print(f"Estado actual: {mat.estado.value}")
+        print("\nSeleccione el nivel del daño:")
+        print("1. Leve - rayado o mancha superficial (25%)")
+        print("2. Moderado - falta una hoja o tapa dañada (50%)")
+        print("3. Grave - varias hojas faltantes o daño que dificulta el uso (75%)")
+        print("4. Pérdida total - extraviado o inutilizable (100%)")
+        opcion = leer_opcion("Seleccione una opción [1-4]:", set(categorias))
+        return categorias[opcion]
 
-    valor_reposicion_clp = 0.0
-    if isinstance(mat, Libro):
-        if mat.es_extranjero:
-            print("\n[*] El libro es extranjero (adquirido en USD).")
-            print(f"    Valor base: ${mat.valor_reposicion_usd:,.2f} USD")
-            print("[*] Consultando cotización del Dólar en vivo desde API (mindicador.cl)...")
-            valor_dolar, origen = obtener_valor_dolar(timeout=5)
-            valor_reposicion_clp = mat.calcularValorReposicion(valor_dolar)
-            print(f"    Cotización dólar ({origen}): ${valor_dolar:,.2f} CLP")
-        else:
-            valor_reposicion_clp = mat.valor_reposicion_pesos
-            print(f"\n[*] Libro nacional con valor de reposición: ${valor_reposicion_clp:,.0f} CLP")
-    else:
-        if mat.valor_reposicion_usd > 0:
-            print(f"\n[*] Material importado con valor base de ${mat.valor_reposicion_usd:,.2f} USD.")
+    def requiere_valor_manual(datos: dict[str, Any]) -> bool:
+        mat = datos.get("material")
+        if mat is None:
+            return False
+        if isinstance(mat, Libro):
+            return (
+                not math.isfinite(mat.valor_reposicion_usd)
+                or mat.valor_reposicion_usd <= 0
+                if mat.es_extranjero
+                else (
+                    not math.isfinite(mat.valor_reposicion_pesos)
+                    or mat.valor_reposicion_pesos <= 0
+                )
+            )
+        return (
+            not math.isfinite(mat.valor_reposicion_usd)
+            or mat.valor_reposicion_usd <= 0
+        )
+
+    def leer_valor_manual(_: dict[str, Any]) -> float:
+        while True:
+            valor = leer_flotante_no_negativo(
+                "El material no tiene valor de reposición cargado. "
+                "Ingrese su valor de reposición en CLP:"
+            )
+            if valor > 0:
+                return valor
+            print("[!] El valor de reposición debe ser mayor que 0.")
+
+    def leer_confirmacion_dano(datos: dict[str, Any]) -> str:
+        socio = datos["socio"]
+        mat = datos["material"]
+        categoria = datos["categoria"]
+        valor_reposicion_clp = datos.get("valor_manual")
+
+        if isinstance(mat, Libro):
+            if mat.es_extranjero and mat.valor_reposicion_usd > 0:
+                print("\n[*] El libro es extranjero (adquirido en USD).")
+                print(f"    Valor base: ${mat.valor_reposicion_usd:,.2f} USD")
+                print("[*] Consultando cotización del Dólar en vivo desde API (mindicador.cl)...")
+                valor_dolar, origen = obtener_valor_dolar(timeout=5)
+                valor_reposicion_clp = mat.calcularValorReposicion(valor_dolar)
+                print(f"    Cotización dólar ({origen}): ${valor_dolar:,.2f} CLP")
+            elif not mat.es_extranjero and mat.valor_reposicion_pesos > 0:
+                valor_reposicion_clp = mat.valor_reposicion_pesos
+                print(
+                    f"\n[*] Libro nacional con valor de reposición: "
+                    f"${valor_reposicion_clp:,.0f} CLP"
+                )
+        elif mat.valor_reposicion_usd > 0:
+            print(
+                f"\n[*] Material importado con valor base de "
+                f"${mat.valor_reposicion_usd:,.2f} USD."
+            )
             print("[*] Consultando cotización del Dólar en vivo desde API...")
             valor_dolar, origen = obtener_valor_dolar(timeout=5)
             valor_reposicion_clp = mat.valor_reposicion_usd * valor_dolar
             print(f"    Cotización dólar ({origen}): ${valor_dolar:,.2f} CLP")
-        else:
-            valor_reposicion_clp = leer_flotante_no_negativo(
-                "El material no tiene valor de reposición cargado. "
-                "Ingrese su valor de reposición en CLP: "
+
+        if (
+            valor_reposicion_clp is None
+            or not math.isfinite(valor_reposicion_clp)
+            or valor_reposicion_clp <= 0
+        ):
+            print("[!] El material no tiene un valor de reposición registrado.")
+            valor_reposicion_clp = leer_entero_positivo(
+                "Ingrese el valor de reposición en CLP para calcular la multa:"
             )
 
-    if not math.isfinite(valor_reposicion_clp) or valor_reposicion_clp <= 0:
-        print("[!] El material no tiene un valor de reposición registrado.")
-        valor_reposicion_clp = leer_entero_positivo(
-            "Ingrese el valor de reposición en CLP para calcular la multa: "
+        porcentaje = PrestamoDAO.PORCENTAJES_DANO[categoria]
+        monto_multa = int(round(valor_reposicion_clp * porcentaje / 100))
+        datos["valor_reposicion_clp"] = valor_reposicion_clp
+        datos["monto_multa"] = monto_multa
+        print(f"    Categoría: {categoria} ({porcentaje}%)")
+        print(f"    Valor de reposición: ${valor_reposicion_clp:,.0f} CLP")
+        print(f"    Multa a aplicar: ${monto_multa:,.0f} CLP")
+        return leer_confirmacion(
+            f"\n¿Confirmar multa de ${monto_multa:,.0f} CLP "
+            f"a {socio.nombre}? [S/N]:"
         )
 
-    porcentaje = PrestamoDAO.PORCENTAJES_DANO[categoria]
-    monto_multa = int(round(valor_reposicion_clp * porcentaje / 100))
-    print(f"    Categoría: {categoria} ({porcentaje}%)")
-    print(f"    Valor de reposición: ${valor_reposicion_clp:,.0f} CLP")
-    print(f"    Multa a aplicar: ${monto_multa:,.0f} CLP")
+    valores_dano = ejecutar_formulario([
+        ("socio", leer_socio, None),
+        ("material", leer_material, None),
+        ("categoria", leer_categoria, None),
+        (
+            "descripcion",
+            lambda _: leer_texto_no_vacio(
+                "Describa el daño (ej. falta una hoja, falta la tapa, está rayado):"
+            ),
+            None,
+        ),
+        ("valor_manual", leer_valor_manual, requiere_valor_manual),
+        ("confirmacion", leer_confirmacion_dano, None),
+    ])
+    if valores_dano is None:
+        return
+    socio = valores_dano["socio"]
+    mat = valores_dano["material"]
+    categoria = valores_dano["categoria"]
+    descripcion = valores_dano["descripcion"]
+    valor_reposicion_clp = valores_dano["valor_reposicion_clp"]
+    confirmar = valores_dano["confirmacion"]
 
-    confirmar = input(
-        f"\n¿Confirmar multa de ${monto_multa:,.0f} CLP a {socio.nombre}? [S/N]: "
-    ).strip().upper()
     if confirmar == "S":
         try:
             resultado = PrestamoDAO.registrar_dano(
@@ -698,38 +1008,67 @@ def menu_pagar_o_condonar_multa():
     print("="*60)
     for numero, (descripcion, _) in enumerate(opciones, 1):
         print(f"{numero}. {descripcion}")
-    opc = input(f"Seleccione una opción [1-{len(opciones)}]: ").strip()
-    if opc.isdigit() and 1 <= int(opc) <= len(opciones):
-        opc = opciones[int(opc) - 1][1]
 
-    if opc == "1":
-        multas_pendientes = [
+    def leer_id_pago(_: dict[str, Any]):
+        multas = [
             multa for multa in SocioDAO.listar_todas_las_multas()
             if multa["estado"] == EstadoMulta.PENDIENTE.value
         ]
-        if not multas_pendientes:
+        if not multas:
             print("\nNo hay multas pendientes para pagar.")
-            return
-
+            return None
         print("\n" + "="*85)
         print("  MULTAS PENDIENTES DE PAGO")
         print("="*85)
         print(f"{'ID':<6} | {'RUT SOCIO':<14} | {'NOMBRE SOCIO':<20} | {'MONTO (CLP)':<12} | {'MOTIVO'}")
         print("-" * 85)
-        for multa in multas_pendientes:
+        for multa in multas:
             print(
                 f"#{multa['id']:<5} | {multa['rut_socio']:<14} | "
                 f"{multa['nombre_socio'][:18]:<20} | "
                 f"${multa['monto']:<11,.0f} | {multa['motivo']}"
             )
         print("-" * 85)
-
-        ids_pendientes = {multa["id"] for multa in multas_pendientes}
+        ids_pendientes = {multa["id"] for multa in multas}
         while True:
-            id_m = leer_entero_positivo("Ingrese el ID de la multa a pagar: ")
-            if id_m in ids_pendientes:
-                break
+            id_multa = leer_entero_positivo("Ingrese el ID de la multa a pagar:")
+            if id_multa in ids_pendientes:
+                return id_multa
             print("[!] Ingrese un ID de la lista de multas pendientes.")
+
+    def leer_socio_pagar(_: dict[str, Any]):
+        while True:
+            rut = leer_rut_validado("Ingrese RUT del socio a dejar al día:")
+            socio = SocioDAO.obtener_por_rut(rut)
+            if socio:
+                return socio
+            print(f"[!] Error: Socio '{rut}' no encontrado.")
+
+    valores = ejecutar_formulario([
+        (
+            "opcion",
+            lambda _: leer_opcion(
+                f"Seleccione una opción [1-{len(opciones)}]:",
+                {codigo for _, codigo in opciones},
+            ),
+            None,
+        ),
+        ("id_pago", leer_id_pago, lambda datos: datos.get("opcion") == "1"),
+        ("socio", leer_socio_pagar, lambda datos: datos.get("opcion") == "2"),
+        (
+            "id_condonar",
+            lambda _: leer_entero_positivo("Ingrese el ID de la multa a condonar:"),
+            lambda datos: datos.get("opcion") == "3",
+        ),
+    ])
+    if valores is None:
+        return
+    opc = valores["opcion"]
+
+    if opc == "1":
+        id_m = valores["id_pago"]
+        if id_m is None:
+            return
 
         if SocioDAO.cambiar_estado_multa(id_m, EstadoMulta.PAGADA):
             print(f"\n[OK] Multa #{id_m} marcada como PAGADA exitosamente.")
@@ -737,11 +1076,7 @@ def menu_pagar_o_condonar_multa():
             print(f"[!] No se encontró la multa #{id_m}.")
 
     elif opc == "2":
-        rut = leer_rut_validado("Ingrese RUT del socio a dejar al día: ")
-        socio = SocioDAO.obtener_por_rut(rut)
-        if not socio:
-            print(f"[!] Error: Socio '{rut}' no encontrado.")
-            return
+        socio = valores["socio"]
 
         filas = SocioDAO.pagar_todas_las_multas_socio(socio.rut)
         if filas > 0:
@@ -753,7 +1088,7 @@ def menu_pagar_o_condonar_multa():
     elif opc == "3":
         if not requerir_administradora("Condonar una multa"):
             return
-        id_m = leer_entero_positivo("Ingrese el ID de la multa a condonar: ")
+        id_m = valores["id_condonar"]
         if SocioDAO.cambiar_estado_multa(id_m, EstadoMulta.CONDONADA):
             print(f"\n[OK] Multa #{id_m} CONDONADA administrativamente por {EMPLEADO_ACTUAL.nombre}.")
         else:
@@ -768,13 +1103,30 @@ def menu_eliminar_socio():
     print("\n" + "="*50)
     print("  ELIMINAR SOCIO")
     print("="*50)
-    rut = leer_rut_validado("Ingrese RUT del socio a eliminar: ")
-    socio = SocioDAO.obtener_por_rut(rut)
-    if not socio:
-        print(f"[!] Error: No se encontró ningún socio con el RUT '{rut}'.")
+    def leer_socio(_: dict[str, Any]):
+        while True:
+            rut = leer_rut_validado("Ingrese RUT del socio a eliminar:")
+            socio = SocioDAO.obtener_por_rut(rut)
+            if socio:
+                return socio
+            print(f"[!] Error: No se encontró ningún socio con el RUT '{rut}'.")
+
+    valores = ejecutar_formulario([
+        ("socio", leer_socio, None),
+        (
+            "confirmacion",
+            lambda datos: leer_confirmacion(
+                f"¿Está seguro de eliminar a '{datos['socio'].nombre}' "
+                f"(RUT: {datos['socio'].rut}) y sus registros? [S/N]:"
+            ),
+            None,
+        ),
+    ])
+    if valores is None:
         return
 
-    confirmar = input(f"¿Está seguro de eliminar a '{socio.nombre}' (RUT: {socio.rut}) y sus registros? [S/N]: ").strip().upper()
+    socio = valores["socio"]
+    confirmar = valores["confirmacion"]
     if confirmar == "S":
         SocioDAO.eliminar(socio.rut)
         print(f"[OK] Socio '{socio.nombre}' eliminado exitosamente.")
@@ -804,7 +1156,12 @@ def menu_socios():
         print("  0. Volver al menú principal")
         print("="*60)
 
-        opc = input(f"Seleccione una opción [0-{len(opciones)}]: ").strip()
+        try:
+            opc = leer_entrada(
+                f"Seleccione una opción [0-{len(opciones)}]:"
+            )
+        except VolverPaso:
+            break
         if opc == "0":
             break
         if opc.isdigit() and 1 <= int(opc) <= len(opciones):
@@ -829,11 +1186,20 @@ def menu_realizar_prestamo():
     print("="*60)
 
     # 1. Identificar al Socio
-    rut_socio = leer_rut_validado("Ingrese RUT del socio solicitante: ")
-    socio = SocioDAO.obtener_por_rut(rut_socio)
-    if not socio:
-        print(f"[!] Error: El socio con RUT '{rut_socio}' no existe en el sistema.")
+    def leer_socio(_: dict[str, Any]):
+        while True:
+            rut = leer_rut_validado("Ingrese RUT del socio solicitante:")
+            socio = SocioDAO.obtener_por_rut(rut)
+            if socio:
+                return socio
+            print(f"[!] El socio con RUT '{rut}' no existe en el sistema.")
+
+    seleccion_socio = ejecutar_formulario([
+        ("socio", leer_socio, None),
+    ])
+    if seleccion_socio is None:
         return
+    socio = seleccion_socio["socio"]
 
     # VALIDACIÓN INICIAL DE MULTAS
     if socio.tiene_multa_pendiente():
@@ -852,7 +1218,21 @@ def menu_realizar_prestamo():
     print("Escriba 'FIN' para procesar el préstamo.\n")
 
     while True:
-        codigo = input("Ingrese código de material ('FIN' para terminar): ").strip().upper()
+        try:
+            codigo = leer_entrada(
+                "Ingrese código de material ('FIN' para terminar):"
+            ).upper()
+        except VolverPaso:
+            if prestamo.detalles:
+                ultimo_detalle = prestamo.detalles.pop()
+                ultimo_detalle.material.estado = EstadoMaterial.DISPONIBLE
+                print(
+                    f"[OK] Se quitó '{ultimo_detalle.material.codigo}' "
+                    "del préstamo pendiente."
+                )
+            else:
+                return
+            continue
         if codigo == "FIN":
             break
         if not codigo:
@@ -904,12 +1284,22 @@ def menu_devolver_material():
     print("\n" + "="*60)
     print("  REGISTRAR DEVOLUCIÓN DE MATERIAL")
     print("="*60)
-    codigo = leer_texto_no_vacio("Ingrese código del material a devolver: ").upper()
-    mat = MaterialDAO.obtener_por_codigo(codigo)
+    def leer_material(_: dict[str, Any]):
+        while True:
+            codigo = leer_texto_no_vacio(
+                "Ingrese código del material a devolver:"
+            ).upper()
+            mat = MaterialDAO.obtener_por_codigo(codigo)
+            if mat:
+                return mat
+            print(f"[!] Error: No existe material con código '{codigo}'.")
 
-    if not mat:
-        print(f"[!] Error: No existe material con código '{codigo}'.")
+    seleccion = ejecutar_formulario([
+        ("material", leer_material, None),
+    ])
+    if seleccion is None:
         return
+    mat = seleccion["material"]
 
     if mat.estado == EstadoMaterial.DISPONIBLE:
         print(f"[!] El material '{mat.titulo}' ({mat.codigo}) ya se encuentra DISPONIBLE en estantería.")
@@ -932,11 +1322,20 @@ def menu_consultar_prestamos():
     print("  CONSULTA DE HISTORIAL DE PRÉSTAMOS POR SOCIO")
     print("="*85)
 
-    rut = leer_rut_validado("Ingrese el RUT del socio: ")
-    socio = SocioDAO.obtener_por_rut(rut)
-    if not socio:
-        print(f"[!] No existe un socio registrado con el RUT '{rut}'.")
+    def leer_socio(_: dict[str, Any]):
+        while True:
+            rut = leer_rut_validado("Ingrese el RUT del socio:")
+            socio = SocioDAO.obtener_por_rut(rut)
+            if socio:
+                return socio
+            print(f"[!] No existe un socio registrado con el RUT '{rut}'.")
+
+    seleccion = ejecutar_formulario([
+        ("socio", leer_socio, None),
+    ])
+    if seleccion is None:
         return
+    socio = seleccion["socio"]
 
     prestamos = [
         prestamo for prestamo in PrestamoDAO.listar_todos()
@@ -967,7 +1366,10 @@ def menu_transacciones():
         print("  0. Volver al menú principal")
         print("="*60)
 
-        opc = input("Seleccione una opción [0-3]: ").strip()
+        try:
+            opc = leer_entrada("Seleccione una opción [0-3]:")
+        except VolverPaso:
+            break
         if opc == "1":
             menu_realizar_prestamo()
         elif opc == "2":

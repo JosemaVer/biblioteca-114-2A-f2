@@ -73,6 +73,9 @@ python main.py
 
 En el primer inicio se crea `data/biblioteca.db` con sus tablas, cuentas de demostración y datos de ejemplo si las tablas correspondientes están vacías. Esta base de datos es local y está excluida de Git: cada clon mantiene sus propios registros. Los datos ingresados en un computador no se transfieren al de otro usuario.
 
+### Navegación durante el ingreso de datos
+En los formularios se puede escribir `VOLVER` para regresar al campo anterior; los campos previos se mantienen y, al retroceder, los posteriores se vuelven a solicitar. Desde el primer campo se regresa al submenú que abrió la operación. Al registrar un préstamo con varios materiales, `VOLVER` quita el último material agregado; si aún no se agregó ninguno, regresa al submenú. El registro de socios también conserva `0` como alternativa para volver. En el inicio de sesión, `0` en el RUT sigue siendo la opción para salir del programa.
+
 ---
 
 ## 🔒 Decisiones de Seguridad Implementadas
