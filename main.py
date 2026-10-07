@@ -703,7 +703,34 @@ def menu_pagar_o_condonar_multa():
         opc = opciones[int(opc) - 1][1]
 
     if opc == "1":
-        id_m = leer_entero_positivo("Ingrese el ID de la multa a pagar: ")
+        multas_pendientes = [
+            multa for multa in SocioDAO.listar_todas_las_multas()
+            if multa["estado"] == EstadoMulta.PENDIENTE.value
+        ]
+        if not multas_pendientes:
+            print("\nNo hay multas pendientes para pagar.")
+            return
+
+        print("\n" + "="*85)
+        print("  MULTAS PENDIENTES DE PAGO")
+        print("="*85)
+        print(f"{'ID':<6} | {'RUT SOCIO':<14} | {'NOMBRE SOCIO':<20} | {'MONTO (CLP)':<12} | {'MOTIVO'}")
+        print("-" * 85)
+        for multa in multas_pendientes:
+            print(
+                f"#{multa['id']:<5} | {multa['rut_socio']:<14} | "
+                f"{multa['nombre_socio'][:18]:<20} | "
+                f"${multa['monto']:<11,.0f} | {multa['motivo']}"
+            )
+        print("-" * 85)
+
+        ids_pendientes = {multa["id"] for multa in multas_pendientes}
+        while True:
+            id_m = leer_entero_positivo("Ingrese el ID de la multa a pagar: ")
+            if id_m in ids_pendientes:
+                break
+            print("[!] Ingrese un ID de la lista de multas pendientes.")
+
         if SocioDAO.cambiar_estado_multa(id_m, EstadoMulta.PAGADA):
             print(f"\n[OK] Multa #{id_m} marcada como PAGADA exitosamente.")
         else:

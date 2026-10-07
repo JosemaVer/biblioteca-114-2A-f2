@@ -10,9 +10,16 @@ class Socio(Persona):
     Representa a un socio lector de la biblioteca.
     Hereda de Persona (rut y nombre) y añade su dirección y control de multas.
     """
-    def __init__(self, rut: str, nombre: str, direccion: str):
+    def __init__(
+        self,
+        rut: str,
+        nombre: str,
+        direccion: str,
+        *,
+        validar_rut: bool = True,
+    ):
         # Invocamos al constructor de la clase padre Persona
-        super().__init__(rut, nombre)
+        super().__init__(rut, nombre, validar_rut=validar_rut)
         self.direccion = direccion
         self.__multas = []  # Lista privada de objetos Multa
 

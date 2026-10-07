@@ -20,7 +20,7 @@ from model.revista import Revista
 from model.multimedia import Multimedia
 from model.multa import Multa
 from model.prestamo import Prestamo
-from dao.conexion import inicializar_base_datos
+from dao.conexion import inicializar_base_datos, obtener_conexion
 from dao.material_dao import MaterialDAO
 from dao.socio_dao import SocioDAO
 from dao.prestamo_dao import PrestamoDAO
@@ -182,6 +182,26 @@ class TestSistemaBiblioteca(unittest.TestCase):
         self.assertTrue(resultado)
         self.assertIsNone(SocioDAO.obtener_por_rut(rut_temp))
 
+    def test_listar_socios_con_rut_historico_no_valido(self):
+        """Los RUT históricos se pueden cargar desde la BD aunque no validen."""
+        rut_historico = "12345678-0"
+        conexion = obtener_conexion()
+        try:
+            conexion.execute(
+                "INSERT INTO socios (rut, nombre, direccion) VALUES (?, ?, ?)",
+                (rut_historico, "Socio Histórico", "Dirección de prueba"),
+            )
+            conexion.commit()
+        finally:
+            conexion.close()
+
+        try:
+            socios = SocioDAO.listar_todos()
+            socio = next(s for s in socios if s.rut == rut_historico)
+            self.assertEqual(socio.nombre, "Socio Histórico")
+        finally:
+            SocioDAO.eliminar(rut_historico)
+
     def test_09_gestion_y_pago_de_multas(self):
         """Prueba la creación, bloqueo de préstamos y posterior pago de una multa."""
         rut_socio = "15345678-K"
@@ -204,4 +224,3 @@ class TestSistemaBiblioteca(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -54,7 +54,12 @@ class SocioDAO:
             conexion.close()
             return None
 
-        socio = Socio(rut=fila[0], nombre=fila[1], direccion=fila[2])
+        socio = Socio(
+            rut=fila[0],
+            nombre=fila[1],
+            direccion=fila[2],
+            validar_rut=False,
+        )
 
         # Cargamos las multas asociadas
         cursor.execute("""
@@ -208,4 +213,3 @@ class SocioDAO:
             raise e
         finally:
             conexion.close()
-
