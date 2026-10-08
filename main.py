@@ -5,8 +5,8 @@ Asignatura: Programación Orientada a Objetos Seguro
 Autores: Nelson Bonomi y José Vergara
 =============================================================================
 Menú interactivo estructurado en 4 módulos principales con control de acceso
-por roles (Bibliotecaria vs Administradora), cálculo de reposición con API Dólar,
-y validaciones rigurosas de negocio.
+por roles (Bibliotecaria vs Administradora), consulta del valor diario del dólar,
+cálculo de reposición con API Dólar y validaciones rigurosas de negocio.
 """
 import sys
 import os
@@ -1383,11 +1383,23 @@ def menu_transacciones():
 
 
 # =============================================================================
-# MENÚ PRINCIPAL AGRUPADO EN 4 OPCIONES
+# MENÚ PRINCIPAL
 # =============================================================================
 
+def consultar_valor_dolar_dia() -> None:
+    """Muestra el valor diario del dólar, usando el respaldo si no hay conexión."""
+    print("\n" + "="*60)
+    print("  CONSULTA DEL VALOR DIARIO DEL DÓLAR")
+    print("="*60)
+    print("[*] Consultando cotización en mindicador.cl...")
+    valor_dolar, origen = obtener_valor_dolar(timeout=5)
+    print(f"\n[OK] Valor del dólar: ${valor_dolar:,.2f} CLP")
+    print(f"     Fuente: {origen}")
+    input("\nPresione Enter para volver al menú principal...")
+
+
 def menu_principal():
-    """Bucle principal de la aplicación simplificado en 4 módulos."""
+    """Bucle principal de la aplicación con acceso a los cuatro módulos."""
     inicializar_base_datos()
     multas_atraso = PrestamoDAO.procesar_multas_atraso()
     if multas_atraso:
@@ -1408,10 +1420,11 @@ def menu_principal():
         print("  2. Socios y Multas (Registro, Historial, Pérdidas con API Dólar)")
         print("  3. Mi sesión (Cambiar usuario o contraseña)")
         print("  4. Transacciones (Préstamos, Devoluciones, Historial)")
+        print("  5. Consultar valor diario del dólar")
         print("  0. Salir del programa")
         print("="*60)
 
-        opcion = input("Seleccione una opción [0-4]: ").strip()
+        opcion = input("Seleccione una opción [0-5]: ").strip()
 
         try:
             if opcion == "1":
@@ -1422,12 +1435,14 @@ def menu_principal():
                 menu_sesion()
             elif opcion == "4":
                 menu_transacciones()
+            elif opcion == "5":
+                consultar_valor_dolar_dia()
             elif opcion == "0":
                 print("\n[!] Gracias por utilizar el Sistema de la Biblioteca Municipal Cordillera.")
                 print("    Cerrando sesión de forma segura...\n")
                 break
             else:
-                print(f"\n[!] Opción '{opcion}' no válida. Seleccione un número entre 0 y 4.")
+                print(f"\n[!] Opción '{opcion}' no válida. Seleccione un número entre 0 y 5.")
         except Exception as error_inesperado:
             print(f"\n[!] Error inesperado: {error_inesperado}")
             print("    El sistema se recuperó y continuará operando normalmente.\n")

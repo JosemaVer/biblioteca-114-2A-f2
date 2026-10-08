@@ -8,7 +8,7 @@
 ---
 
 ## 📋 Descripción del Proyecto
-El **Sistema de Gestión para la Biblioteca Municipal Cordillera** es una aplicación desarrollada en Python que implementa los paradigmas de **Programación Orientada a Objetos (POO)**, persistencia relacional en **SQLite** mediante el patrón **DAO (Data Access Object)**, seguridad contra **Inyección SQL**, validación de datos de entrada mediante el algoritmo **Módulo 11** para el RUT chileno, y consumo resiliente de servicios externos mediante una **API REST (mindicador.cl)** con tolerancia a fallos.
+El **Sistema de Gestión para la Biblioteca Municipal Cordillera** es una aplicación desarrollada en Python que implementa los paradigmas de **Programación Orientada a Objetos (POO)**, persistencia local en **SQLite** y archivos **JSON** de apoyo mediante el patrón **DAO (Data Access Object)**, seguridad contra **Inyección SQL**, validación de datos de entrada mediante el algoritmo **Módulo 11** para el RUT chileno, y consumo resiliente de servicios externos mediante una **API REST (mindicador.cl)** con tolerancia a fallos.
 
 ---
 
@@ -44,7 +44,11 @@ biblioteca-114-2A-f2/
 │   └── passwords.py            <-- Hash y verificación de contraseñas
 │
 ├── data/                       <-- Datos locales creados al iniciar
-│   └── biblioteca.db           <-- Base SQLite local (no se versiona)
+│   ├── biblioteca.db           <-- Base SQLite local principal (no se versiona)
+│   ├── materiales.json         <-- Catálogo de materiales en formato JSON
+│   ├── socios.json             <-- Registro de socios en formato JSON
+│   ├── prestamos.json          <-- Registro de préstamos en formato JSON
+│   └── multas.json             <-- Registro de multas en formato JSON
 │
 ├── main.py                     <-- Menú interactivo CLI con control de errores
 ├── requirements.txt            <-- Dependencias del proyecto (requests)
@@ -71,7 +75,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-En el primer inicio se crea `data/biblioteca.db` con sus tablas, cuentas de demostración y datos de ejemplo si las tablas correspondientes están vacías. Esta base de datos es local y está excluida de Git: cada clon mantiene sus propios registros. Los datos ingresados en un computador no se transfieren al de otro usuario.
+En el primer inicio se crea `data/biblioteca.db` con sus tablas, cuentas de demostración y datos de ejemplo si las tablas correspondientes están vacías. Además, la carpeta `data/` puede contener archivos con estructura JSON para respaldar datos locales, exportaciones, cargas iniciales o registros auxiliares del sistema. Estos archivos son locales y se mantienen fuera de Git: cada clon mantiene sus propios registros. Los datos ingresados en un computador no se transfieren al de otro usuario.
 
 ### Navegación durante el ingreso de datos
 En los formularios se puede escribir `VOLVER` para regresar al campo anterior; los campos previos se mantienen y, al retroceder, los posteriores se vuelven a solicitar. Desde el primer campo se regresa al submenú que abrió la operación. Al registrar un préstamo con varios materiales, `VOLVER` quita el último material agregado; si aún no se agregó ninguno, regresa al submenú. El registro de socios también conserva `0` como alternativa para volver. En el inicio de sesión, `0` en el RUT sigue siendo la opción para salir del programa.
@@ -112,6 +116,7 @@ En los formularios se puede escribir `VOLVER` para regresar al campo anterior; l
 ### 5. Consumo Resiliente de API con Timeout
 - La consulta a `https://mindicador.cl/api/dolar` cuenta con un parámetro `timeout=5`.
 - Si se pierde la conexión a internet o el servidor no responde, se captura `requests.RequestException`, se emite una advertencia clara por consola y se utiliza un **valor de contingencia configurado ($984.82 CLP)**, garantizando la continuidad operativa del sistema.
+- La opción **5. Consultar valor diario del dólar** del menú principal muestra la cotización y su fuente; sin conexión, muestra y utiliza el mismo valor de contingencia configurado.
 
 ---
 
